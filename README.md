@@ -1,17 +1,50 @@
-# iTerm2axis
+# iTerm2Axis
 
-A Hammerspoon window manager that provides a left-side sidebar for managing stacked iTerm2 windows, emulating some of the functionality of cmux while keeping iTerm2's native tmux support. This empowers you to open tmux sessions on different computers in different windows, preserving tabs but allowing quick switching between machines. Also useful for keeping track of multiple coding agent sessions.
+A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floating sidebar to iTerm2, letting you switch between stacked windows the way tmux lets you switch panes — without leaving the keyboard or spawning a new process.
 
-## Project Structure
+## Features
 
-- `init.lua` — The Hammerspoon config file
-
-## Hotkeys
-
-- `⌘⇧A` — Show/hide the sidebar
-- `⌘⇧N` — New iTerm window (auto-tiled)
-- `⌘⇧R` — Refresh layout
+- Floating sidebar showing all open iTerm2 windows
+- Click any window button to bring it to the front
+- Drag the **Move** handle to reposition the sidebar + windows together
+- Help panel with configurable shortcut reference
+- Auto-refreshes on window open/close/title change and screen layout changes
 
 ## Installation
 
-- Copy this `init.lua` file to `~/.hammerspoon/init.lua` and reload/start Hammerspoon
+1. Download or clone this repo.
+2. Copy (or symlink) `iTerm2Axis.spoon` into `~/.hammerspoon/Spoons/`.
+3. Add to your `~/.hammerspoon/init.lua`:
+
+```lua
+hs.loadSpoon("iTerm2Axis")
+spoon.iTerm2Axis:bindHotkeys({
+    toggle     = {{"cmd", "shift"}, "A"},
+    newWindow  = {{"cmd", "shift"}, "N"},
+    refresh    = {{"cmd", "shift"}, "R"},
+})
+spoon.iTerm2Axis:start()
+```
+
+## Default Hotkeys
+
+| Key | Action |
+|---|---|
+| ⌘⇧A | Show / hide the Axis sidebar |
+| ⌘⇧N | Open a new iTerm2 window |
+| ⌘⇧R | Force-refresh the layout |
+
+You can override any of these via `bindHotkeys` (see above).
+
+## Configuration
+
+Customise `spoon.iTerm2Axis.config` before calling `:start()`:
+
+```lua
+spoon.iTerm2Axis.config.sidebarWidth = 200
+spoon.iTerm2Axis.config.activeButtonColor = {red=0.8, green=0.3, blue=0.1, alpha=1}
+```
+
+## License
+
+MIT
