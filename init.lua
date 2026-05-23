@@ -565,6 +565,13 @@ axis._winWatcher:subscribe(hs.window.filter.windowTitleChanged, function()
         axis.buildSidebar()
     end)
 end)
+-- Subscribe to window moved and resized events for immediate response
+axis._winWatcher:subscribe(hs.window.filter.windowMoved, function()
+    axis.handleWindowMoveOrResize()
+end)
+axis._winWatcher:subscribe(hs.window.filter.windowResized, function()
+    axis.handleWindowMoveOrResize()
+end)
 
 -- ─────────────────────────────────────────────
 -- Screen change watcher
@@ -581,111 +588,82 @@ axis._screenWatcher = hs.screen.watcher.new(function()
 end)
 axis._screenWatcher:start()
 
--- ─────────────────────────────────────────────
--- Polling timer to catch manual window resizes
--- ─────────────────────────────────────────────
+-- Debounced handler for window move/resize events
+axis._resizeDebounceTimer = nil
 
-if axis._pollTimer then axis._pollTimer:stop() end
-
-axis._pollTimer = hs.timer.doEvery(0.2, function()
-    if axis.dragging then return end
-
-    local wins = getITermWindows()
-    if #wins == 0 then return end
-
-    -- Detect screen change
-    local winScreen = axis.findWindowScreen(wins)
-    local screenChanged = (winScreen ~= axis._currentScreen)
-
-    local layout = axis.computeLayout()
-    local iterm = layout.iterm
-    local cfg = axis.config
-
-    -- Build the "expected" content frame based on where the sidebar
-    -- actually is (if we have one).  After a manual move this will
-    -- match the adjusted position; on a fresh layout it will match
-    -- the full-screen default.
-    local expected = nil
-    if axis.sidebarCanvas then
-        local sf = axis.sidebarCanvas:frame()
-        expected = {
-            x = sf.x + sf.w,
-            y = sf.y,
-            w = sf.w > 0 and (iterm.w) or iterm.w,
-            h = sf.h,
-        }
-    else
-        expected = iterm
+function axis.handleWindowMoveOrResize()
+    -- Cancel any existing timer
+    if axis._resizeDebounceTimer then
+        axis._resizeDebounceTimer:stop()
     end
+    
+    -- Set a new timer to execute after a short delay
+    axis._resizeDebounceTimer = hs.timer.doAfter(0.15, function()
+        if axis.dragging then return end
 
-    if screenChanged then
-        axis._currentScreen = winScreen
-        axis.buildSidebar()
-        axis.buildHelpMenu()
-        axis.tileITermWindows()
-        return
-    end
+        local wins = getITermWindows()
+        if #wins == 0 then return end
 
-    -- Find a window that has drifted from the expected content frame.
-    -- Prefer the frontmost drifted window since that's the one the
-    -- user most likely just moved or resized.
-    local driftedWin = nil
-    local function isDrifted(win)
-        local f = win:frame()
-        return math.abs(f.x - expected.x) > 5 or
-               math.abs(f.y - expected.y) > 5 or
-               math.abs(f.w - expected.w) > 5 or
-               math.abs(f.h - expected.h) > 5
-    end
-    -- Search front-to-back so the topmost drifted window wins
-    for i = #wins, 1, -1 do
-        if isDrifted(wins[i]) then
-            driftedWin = wins[i]
-            break
-        end
-    end
+        -- Detect screen change
+        local winScreen = axis.findWindowScreen(wins)
+        local screenChanged = (winScreen ~= axis._currentScreen)
 
-    if driftedWin then
-        -- Re-read the drifted window's current frame after the move/resize
-        local f = driftedWin:frame()
+        local layout = axis.computeLayout()
+        local iterm = layout.iterm
+        local cfg = axis.config
 
-        -- Step 1: Redraw the sidebar along the left edge of this window
-        local sidebarW = cfg.sidebarWidth
-        local sidebarX = f.x
-
+        -- Build the "expected" content frame based on where the sidebar
+        -- actually is (if we have one).  After a manual move this will
+        -- match the adjusted position; on a fresh layout it will match
+        -- the full-screen default.
+        local expected = nil
         if axis.sidebarCanvas then
-            axis.sidebarCanvas:setFrame({
-                x = sidebarX,
-                y = f.y,
-                w = sidebarW,
-                h = f.h,
-            })
-        end
-        if axis.helpCanvas then
-            local helpH = axis.helpMenuOpen and cfg.helpMenuHeight or 0
-            axis.helpCanvas:setFrame({
-                x = sidebarX,
-                y = f.y + f.h - helpH,
-                w = sidebarW,
-                h = helpH,
-            })
+            local sf = axis.sidebarCanvas:frame()
+            expected = {
+                x = sf.x + sf.w,
+                y = sf.y,
+                w = sf.w > 0 and (iterm.w) or iterm.w,
+                h = sf.h,
+            }
+        else
+            expected = iterm
         end
 
-        -- Step 2: Slide the left edge right by sidebarWidth
-        local contentX = sidebarX + sidebarW
-        local contentW = f.w - sidebarW
+        if screenChanged then
+            axis._currentScreen = winScreen
+            axis.buildSidebar()
+            axis.buildHelpMenu()
+            axis.tileITermWindows()
+            return
+        end
 
-        -- If too narrow to eat into the window, place sidebar
-        -- to the left instead (same logic as before)
-        if contentW < 100 then
-            local screenLeft = layout.screenFrame.x
-            sidebarX = f.x - sidebarW
-            if sidebarX < screenLeft then
-                sidebarX = screenLeft
+        -- Find a window that has drifted from the expected content frame.
+        -- Prefer the frontmost drifted window since that's the one the
+        -- user most likely just moved or resized.
+        local driftedWin = nil
+        local function isDrifted(win)
+            local f = win:frame()
+            return math.abs(f.x - expected.x) > 5 or
+                   math.abs(f.y - expected.y) > 5 or
+                   math.abs(f.w - expected.w) > 5 or
+                   math.abs(f.h - expected.h) > 5
+        end
+        -- Search front-to-back so the topmost drifted window wins
+        for i = #wins, 1, -1 do
+            if isDrifted(wins[i]) then
+                driftedWin = wins[i]
+                break
             end
-            contentX = sidebarX + sidebarW
-            contentW = f.x + f.w - contentX
-            -- Reposition sidebar at the clamped location
+        end
+
+        if driftedWin then
+            -- Re-read the drifted window's current frame after the move/resize
+            local f = driftedWin:frame()
+
+            -- Step 1: Redraw the sidebar along the left edge of this window
+            local sidebarW = cfg.sidebarWidth
+            local sidebarX = f.x
+
             if axis.sidebarCanvas then
                 axis.sidebarCanvas:setFrame({
                     x = sidebarX,
@@ -703,31 +681,65 @@ axis._pollTimer = hs.timer.doEvery(0.2, function()
                     h = helpH,
                 })
             end
-        end
 
-        -- Step 3: Apply this adjusted frame to ALL iTerm windows
-        local newFrame = {
-            x = contentX,
-            y = f.y,
-            w = contentW,
-            h = f.h,
-        }
-        for _, w in ipairs(wins) do
-            w:setFrame(newFrame)
-        end
+            -- Step 2: Slide the left edge right by sidebarWidth
+            local contentX = sidebarX + sidebarW
+            local contentW = f.w - sidebarW
 
-        -- Step 4: Rebuild sidebar with updated content
-        axis.buildSidebar()
-        axis.buildHelpMenu()
+            -- If too narrow to eat into the window, place sidebar
+            -- to the left instead (same logic as before)
+            if contentW < 100 then
+                local screenLeft = layout.screenFrame.x
+                sidebarX = f.x - sidebarW
+                if sidebarX < screenLeft then
+                    sidebarX = screenLeft
+                end
+                contentX = sidebarX + sidebarW
+                contentW = f.x + f.w - contentX
+                -- Reposition sidebar at the clamped location
+                if axis.sidebarCanvas then
+                    axis.sidebarCanvas:setFrame({
+                        x = sidebarX,
+                        y = f.y,
+                        w = sidebarW,
+                        h = f.h,
+                    })
+                end
+                if axis.helpCanvas then
+                    local helpH = axis.helpMenuOpen and cfg.helpMenuHeight or 0
+                    axis.helpCanvas:setFrame({
+                        x = sidebarX,
+                        y = f.y + f.h - helpH,
+                        w = sidebarW,
+                        h = helpH,
+                    })
+                end
+            end
 
-        -- Update tracked screen
-        local center = { x = contentX + contentW / 2, y = f.y + f.h / 2 }
-        local newScreen = hs.screen.find(center)
-        if newScreen then
-            axis._currentScreen = newScreen
+            -- Step 3: Apply this adjusted frame to ALL iTerm windows
+            local newFrame = {
+                x = contentX,
+                y = f.y,
+                w = contentW,
+                h = f.h,
+            }
+            for _, w in ipairs(wins) do
+                w:setFrame(newFrame)
+            end
+
+            -- Step 4: Rebuild sidebar with updated content
+            axis.buildSidebar()
+            axis.buildHelpMenu()
+
+            -- Update tracked screen
+            local center = { x = contentX + contentW / 2, y = f.y + f.h / 2 }
+            local newScreen = hs.screen.find(center)
+            if newScreen then
+                axis._currentScreen = newScreen
+            end
         end
-    end
-end)
+    end)
+end
 
 -- ─────────────────────────────────────────────
 -- Initialize
