@@ -640,7 +640,9 @@ function obj:start()
         self:handleWindowMoveOrResize()
     end)
     self._winWatcher:subscribe("windowFocused", function()
-        self:handleWindowMoveOrResize()
+        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self:handleWindowMoveOrResize()
+        end
     end)
 
     -- Seed uielement watchers for already-open iTerm windows
