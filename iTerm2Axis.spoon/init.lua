@@ -326,7 +326,7 @@ function obj:tileITermWindows()
 end
 
 function obj:bringWindowToFront(windowId)
-    local win = hs.window.find(windowId)
+    local win = hs.window.get(windowId)
     if not win then return end
     self.activeWindowId = windowId
     win:raise()
@@ -396,6 +396,23 @@ end
 
 function obj:stopDrag()
     self.dragging = false
+end
+
+-- ─────────────────────────────────────────────
+-- Per-Window UIElement Watcher (for resize events)
+-- ─────────────────────────────────────────────
+
+function obj:watchWindow(win)
+    if not win then return end
+    local id = win:id()
+    if self._windowWatchers[id] then return end
+    local watcher = win:newWatcher(function(element, event)
+        if event == hs.uielement.watcher.windowResized then
+            self:handleWindowMoveOrResize()
+        end
+    end, self)
+    watcher:start({ hs.uielement.watcher.windowResized })
+    self._windowWatchers[id] = watcher
 end
 
 -- ─────────────────────────────────────────────
@@ -602,15 +619,18 @@ function obj:start()
     self._mouseTap:start()
 
     -- Window watcher
-    -- NOTE: hs.window.filter does not support "windowResized" as an event.
-    -- Use "windowMoved" to detect layout drift, which covers most resize-via-drag
-    -- cases. For true resize events, an hs.uielement.watcher would be needed.
     if self._winWatcher then self._winWatcher:stop() end
     self._winWatcher = hs.window.filter.new("iTerm2")
-    self._winWatcher:subscribe("windowCreated", function()
+    self._winWatcher:subscribe("windowCreated", function(win)
+        if win then self:watchWindow(win) end
         hs.timer.doAfter(0.3, function() self:buildSidebar(); self:tileITermWindows() end)
     end)
-    self._winWatcher:subscribe("windowDestroyed", function()
+    self._winWatcher:subscribe("windowDestroyed", function(win)
+        local id = win and win:id()
+        if id and self._windowWatchers[id] then
+            self._windowWatchers[id]:stop()
+            self._windowWatchers[id] = nil
+        end
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowTitleChanged", function()
@@ -619,6 +639,14 @@ function obj:start()
     self._winWatcher:subscribe("windowMoved", function()
         self:handleWindowMoveOrResize()
     end)
+    self._winWatcher:subscribe("windowFocused", function()
+        self:handleWindowMoveOrResize()
+    end)
+
+    -- Seed uielement watchers for already-open iTerm windows
+    for _, win in ipairs(getITermWindows()) do
+        self:watchWindow(win)
+    end
 
     -- Screen watcher
     if self._screenWatcher then self._screenWatcher:stop() end
@@ -647,6 +675,10 @@ function obj:stop()
     if self._mouseTap    then self._mouseTap:stop();    self._mouseTap    = nil end
     if self._winWatcher  then self._winWatcher:stop();  self._winWatcher  = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
+    for _, w in pairs(self._windowWatchers or {}) do
+        w:stop()
+    end
+    self._windowWatchers = {}
     if self.sidebarCanvas  then self.sidebarCanvas:delete();  self.sidebarCanvas  = nil end
     if self.helpCanvas     then self.helpCanvas:delete();     self.helpCanvas     = nil end
     return self
@@ -671,9 +703,10 @@ function obj:init()
     self._buttonFrames  = {}
     self._helpButtonFrame = nil
     self._resizeDebounceTimer = nil
-    self._mouseTap      = nil
-    self._winWatcher    = nil
-    self._screenWatcher = nil
+    self._mouseTap       = nil
+    self._winWatcher     = nil
+    self._screenWatcher  = nil
+    self._windowWatchers = {}
     return self
 end
 

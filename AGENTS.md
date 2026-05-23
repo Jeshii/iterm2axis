@@ -4,7 +4,7 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 
 ## Project Structure
 
-- `init.lua` — The main (and only) Hammerspoon config file. This is the source of truth.
+- `iTerm2Axis.spoon/init.lua` — The main (and only) Hammerspoon config file. This is the source of truth.
 
 ## How It Works
 
@@ -24,6 +24,6 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 
 ## Important Rules
 
-- **Do NOT automatically copy `init.lua` to `~/.hammerspoon/init.lua`.** The user will copy it manually after reviewing changes.
-- All edits go into the repo's `init.lua`. The user handles deployment.
+- **Do NOT automatically copy `iTerm2Axis.spoon` to `~/.hammerspoon/Spoons/`.** The user will copy it manually after reviewing changes.
+- All edits go into the repo's `iTerm2Axis.spoon/init.lua`. The user handles deployment.
 - When debugging, ask the user to check Hammerspoon's Console (menu bar icon → Console) or run `/Applications/Hammerspoon.app/Contents/MacOS/Hammerspoon` from a terminal to see errors.
