@@ -1,31 +1,50 @@
--- iTerm2 Axis - Hammerspoon Window Manager
--- A left-side sidebar for managing stacked iTerm2 windows
+--- iTerm2Axis - Hammerspoon Window Manager Spoon
+--- A left-side sidebar for managing stacked iTerm2 windows, emulating tmux-like layout.
+---
+--- Download: [https://github.com/Jeshii/iterm2axis](https://github.com/Jeshii/iterm2axis)
+--- @author Jesse Fuller
+--- @license MIT
 
-local axis = {}
-axis.config = {
-    sidebarWidth = 160,
-    sidebarColor = { red = 0.12, green = 0.12, blue = 0.14, alpha = 0.95 },
-    buttonColor = { red = 0.2, green = 0.2, blue = 0.22, alpha = 1 },
-    buttonHoverColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 1 },
-    activeButtonColor = { red = 0.25, green = 0.5, blue = 0.8, alpha = 1 },
-    textColor = { red = 0.9, green = 0.9, blue = 0.9, alpha = 1 },
-    helpMenuHeight = 200,
-    moveButtonHeight = 30,
+local obj = {}
+obj.__index = obj
+
+-- Metadata
+obj.name     = "iTerm2Axis"
+obj.version  = "0.1.0"
+obj.author   = "Jesse Fuller"
+obj.license  = "MIT - https://opensource.org/licenses/MIT"
+obj.homepage = "https://github.com/Jeshii/iterm2axis"
+
+obj.config = {
+    sidebarWidth      = 160,
+    sidebarColor      = { red = 0.12, green = 0.12, blue = 0.14, alpha = 0.95 },
+    buttonColor       = { red = 0.2,  green = 0.2,  blue = 0.22, alpha = 1 },
+    buttonHoverColor  = { red = 0.3,  green = 0.3,  blue = 0.35, alpha = 1 },
+    activeButtonColor = { red = 0.25, green = 0.5,  blue = 0.8,  alpha = 1 },
+    textColor         = { red = 0.9,  green = 0.9,  blue = 0.9,  alpha = 1 },
+    helpMenuHeight    = 200,
+    moveButtonHeight  = 30,
     windowButtonHeight = 36,
-    padding = 8,
+    padding           = 8,
 }
 
 -- State
-axis.windows = {}        -- { {name="main", window=hs.window, ...}, ...}
-axis.sidebarCanvas = nil
-axis.helpCanvas = nil
-axis.isHelpVisible = false
-axis.activeWindowId = nil
-axis.dragging = false
-axis.dragStart = { x = 0, y = 0 }
-axis.sidebarStart = { x = 0, y = 0, w = 0, h = 0 }
-axis.helpMenuOpen = false
-axis._currentScreen = nil  -- tracked screen for sidebar
+obj.windows        = {}
+obj.sidebarCanvas  = nil
+obj.helpCanvas     = nil
+obj.isHelpVisible  = false
+obj.activeWindowId = nil
+obj.dragging       = false
+obj.dragStart      = { x = 0, y = 0 }
+obj.sidebarStart   = { x = 0, y = 0, w = 0, h = 0 }
+obj.helpMenuOpen   = false
+obj._currentScreen = nil
+obj._buttonFrames  = {}
+obj._helpButtonFrame = nil
+obj._resizeDebounceTimer = nil
+obj._mouseTap      = nil
+obj._winWatcher    = nil
+obj._screenWatcher = nil
 
 -- ─────────────────────────────────────────────
 -- Helpers
@@ -46,9 +65,7 @@ local function getITermWindows()
             table.insert(result, w)
         end
     end
-    table.sort(result, function(a, b)
-        return a:id() < b:id()
-    end)
+    table.sort(result, function(a, b) return a:id() < b:id() end)
     return result
 end
 
@@ -60,7 +77,7 @@ end
 -- Layout
 -- ─────────────────────────────────────────────
 
-function axis.findWindowScreen(wins)
+function obj:findWindowScreen(wins)
     if #wins == 0 then return hs.screen.mainScreen() end
     local win = wins[1]
     local wf = win:frame()
@@ -75,54 +92,42 @@ function axis.findWindowScreen(wins)
     return hs.screen.mainScreen()
 end
 
-function axis.getScreen()
-    if axis._currentScreen then
-        return axis._currentScreen
-    end
+function obj:getScreen()
+    if self._currentScreen then return self._currentScreen end
     local wins = getITermWindows()
-    local screen = axis.findWindowScreen(wins)
-    axis._currentScreen = screen
+    local screen = self:findWindowScreen(wins)
+    self._currentScreen = screen
     return screen
 end
 
-function axis.computeLayout()
-    local screen = axis.getScreen()
+function obj:computeLayout()
+    local screen = self:getScreen()
     local f = screen:frame()
-    local cfg = axis.config
+    local cfg = self.config
 
-    -- If the sidebar has been manually repositioned, use its actual
-    -- position as the anchor instead of assuming screen left edge.
     local sidebarX = f.x
-    if axis.sidebarCanvas then
-        local sf = axis.sidebarCanvas:frame()
-        -- Only trust the sidebar position if it's on the same screen
+    if self.sidebarCanvas then
+        local sf = self.sidebarCanvas:frame()
         if math.abs(sf.y - f.y) < f.h then
             sidebarX = sf.x
         end
     end
 
-    local sidebar = {
-        x = sidebarX,
-        y = f.y,
-        w = cfg.sidebarWidth,
-        h = f.h,
-    }
-
-    local iterm = {
+    local sidebar = { x = sidebarX, y = f.y, w = cfg.sidebarWidth, h = f.h }
+    local iterm   = {
         x = sidebarX + cfg.sidebarWidth,
         y = f.y,
         w = f.w - cfg.sidebarWidth - (sidebarX - f.x),
         h = f.h,
     }
-
-    local helpH = axis.helpMenuOpen and cfg.helpMenuHeight or 0
+    local helpH = self.helpMenuOpen and cfg.helpMenuHeight or 0
 
     return {
-        screen = screen,
+        screen      = screen,
         screenFrame = f,
-        sidebar = sidebar,
-        iterm = iterm,
-        helpHeight = helpH,
+        sidebar     = sidebar,
+        iterm       = iterm,
+        helpHeight  = helpH,
     }
 end
 
@@ -130,19 +135,17 @@ end
 -- Sidebar
 -- ─────────────────────────────────────────────
 
-function axis.buildSidebar()
-    if axis.sidebarCanvas then
-        axis.sidebarCanvas:delete()
-        axis.sidebarCanvas = nil
+function obj:buildSidebar()
+    if self.sidebarCanvas then
+        self.sidebarCanvas:delete()
+        self.sidebarCanvas = nil
     end
 
-    local layout = axis.computeLayout()
-    local sb = layout.sidebar
-    local cfg = axis.config
+    local layout = self:computeLayout()
+    local sb  = layout.sidebar
+    local cfg = self.config
 
-    local canvas = hs.canvas.new({
-        x = sb.x, y = sb.y, w = sb.w, h = sb.h
-    })
+    local canvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
     canvas:level(hs.canvas.windowLevels.floating)
     canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
     canvas:alpha(1)
@@ -170,7 +173,6 @@ function axis.buildSidebar()
         fillColor = { red = 0.15, green = 0.15, blue = 0.18, alpha = 1 },
         strokeWidth = 0,
     })
-
     canvas:appendElements({
         type = "text",
         frame = { x = 0, y = 2, w = sb.w, h = cfg.moveButtonHeight },
@@ -191,15 +193,13 @@ function axis.buildSidebar()
     -- Window buttons
     local itermWins = getITermWindows()
     local y = cfg.moveButtonHeight + 6
-
-    axis._buttonFrames = {}
+    self._buttonFrames = {}
 
     for i, win in ipairs(itermWins) do
-        local winId = win:id()
-        local isActive = (winId == axis.activeWindowId)
+        local winId   = win:id()
+        local isActive = (winId == self.activeWindowId)
         local btnColor = isActive and cfg.activeButtonColor or cfg.buttonColor
 
-        -- Button background
         canvas:appendElements({
             type = "rectangle",
             frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
@@ -208,11 +208,8 @@ function axis.buildSidebar()
             roundedRectRadii = { xRadius = 4, yRadius = 4 },
         })
 
-        -- Button label
         local title = win:title() or ("Window " .. i)
-        if #title > 18 then
-            title = title:sub(1, 16) .. "…"
-        end
+        if #title > 18 then title = title:sub(1, 16) .. "…" end
 
         canvas:appendElements({
             type = "text",
@@ -223,12 +220,11 @@ function axis.buildSidebar()
             textAlignment = "left",
         })
 
-        axis._buttonFrames[i] = {
+        self._buttonFrames[i] = {
             x = cfg.padding, y = y,
             w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
             windowId = winId,
         }
-
         y = y + cfg.windowButtonHeight + 4
     end
 
@@ -249,22 +245,21 @@ function axis.buildSidebar()
         strokeWidth = 0,
         roundedRectRadii = { xRadius = 4, yRadius = 4 },
     })
-
     canvas:appendElements({
         type = "text",
         frame = { x = 0, y = y, w = sb.w, h = 28 },
-        text = (axis.helpMenuOpen and "▴  Help" or "▾  Help"),
+        text = (self.helpMenuOpen and "▴  Help" or "▾  Help"),
         textColor = { red = 0.7, green = 0.7, blue = 0.75, alpha = 1 },
         textSize = 11,
         textAlignment = "center",
     })
 
-    axis._helpButtonFrame = {
+    self._helpButtonFrame = {
         x = cfg.padding, y = y,
         w = sb.w - cfg.padding * 2, h = 28,
     }
 
-    axis.sidebarCanvas = canvas
+    self.sidebarCanvas = canvas
     canvas:show()
 end
 
@@ -272,18 +267,16 @@ end
 -- Help Menu
 -- ─────────────────────────────────────────────
 
-function axis.buildHelpMenu()
-    if axis.helpCanvas then
-        axis.helpCanvas:delete()
-        axis.helpCanvas = nil
+function obj:buildHelpMenu()
+    if self.helpCanvas then
+        self.helpCanvas:delete()
+        self.helpCanvas = nil
     end
+    if not self.helpMenuOpen then return end
 
-    if not axis.helpMenuOpen then return end
-
-    local layout = axis.computeLayout()
-    local sb = layout.sidebar
-    local cfg = axis.config
-
+    local layout = self:computeLayout()
+    local sb  = layout.sidebar
+    local cfg = self.config
     local helpY = sb.h - layout.helpHeight
 
     local canvas = hs.canvas.new({
@@ -292,15 +285,12 @@ function axis.buildHelpMenu()
     canvas:level(hs.canvas.windowLevels.floating)
     canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
 
-    -- Background
     canvas:appendElements({
         type = "rectangle",
         frame = { x = 0, y = 0, w = sb.w, h = layout.helpHeight },
         fillColor = { red = 0.1, green = 0.1, blue = 0.12, alpha = 0.95 },
         strokeWidth = 0,
     })
-
-    -- Top border
     canvas:appendElements({
         type = "rectangle",
         frame = { x = 0, y = 0, w = sb.w, h = 1 },
@@ -308,7 +298,6 @@ function axis.buildHelpMenu()
         strokeWidth = 0,
     })
 
-    -- Help content
     local helpLines = {
         "⌘ Shortcuts:",
         "",
@@ -331,14 +320,14 @@ function axis.buildHelpMenu()
             text = line,
             textColor = isHeader
                 and { red = 0.5, green = 0.7, blue = 1.0, alpha = 1 }
-                or { red = 0.7, green = 0.7, blue = 0.75, alpha = 1 },
+                or  { red = 0.7, green = 0.7, blue = 0.75, alpha = 1 },
             textSize = 10,
             textAlignment = "left",
         })
         y = y + 14
     end
 
-    axis.helpCanvas = canvas
+    self.helpCanvas = canvas
     canvas:show()
 end
 
@@ -346,51 +335,35 @@ end
 -- Window Management
 -- ─────────────────────────────────────────────
 
-function axis.tileITermWindows()
-    local layout = axis.computeLayout()
+function obj:tileITermWindows()
+    local layout     = self:computeLayout()
     local itermFrame = layout.iterm
-
-    local wins = getITermWindows()
-    for _, win in ipairs(wins) do
-        win:setFrame({
-            x = itermFrame.x,
-            y = itermFrame.y,
-            w = itermFrame.w,
-            h = itermFrame.h,
-        })
+    for _, win in ipairs(getITermWindows()) do
+        win:setFrame({ x = itermFrame.x, y = itermFrame.y, w = itermFrame.w, h = itermFrame.h })
     end
 end
 
-function axis.bringWindowToFront(windowId)
+function obj:bringWindowToFront(windowId)
     local win = hs.window.find(windowId)
     if not win then return end
-
-    axis.activeWindowId = windowId
-
+    self.activeWindowId = windowId
     win:raise()
     win:focus()
-
-    axis.buildSidebar()
+    self:buildSidebar()
 end
 
-function axis.moveAllWindows(dx, dy)
-    local wins = getITermWindows()
-    for _, win in ipairs(wins) do
+function obj:moveAllWindows(dx, dy)
+    for _, win in ipairs(getITermWindows()) do
         local f = win:frame()
-        win:setFrame({
-            x = f.x + dx,
-            y = f.y + dy,
-            w = f.w,
-            h = f.h,
-        })
+        win:setFrame({ x = f.x + dx, y = f.y + dy, w = f.w, h = f.h })
     end
-    if axis.sidebarCanvas then
-        local sf = axis.sidebarCanvas:frame()
-        axis.sidebarCanvas:setTopLeft({ x = sf.x + dx, y = sf.y + dy })
+    if self.sidebarCanvas then
+        local sf = self.sidebarCanvas:frame()
+        self.sidebarCanvas:setTopLeft({ x = sf.x + dx, y = sf.y + dy })
     end
-    if axis.helpCanvas then
-        local hf = axis.helpCanvas:frame()
-        axis.helpCanvas:setTopLeft({ x = hf.x + dx, y = hf.y + dy })
+    if self.helpCanvas then
+        local hf = self.helpCanvas:frame()
+        self.helpCanvas:setTopLeft({ x = hf.x + dx, y = hf.y + dy })
     end
 end
 
@@ -398,23 +371,21 @@ end
 -- Mouse Handling
 -- ─────────────────────────────────────────────
 
-function axis.handleSidebarClick(x, y)
-    if not axis._buttonFrames then return end
+function obj:handleSidebarClick(x, y)
+    if not self._buttonFrames then return end
 
-    -- Check help button
-    local hb = axis._helpButtonFrame
+    local hb = self._helpButtonFrame
     if hb and x >= hb.x and x <= hb.x + hb.w and y >= hb.y and y <= hb.y + hb.h then
-        axis.helpMenuOpen = not axis.helpMenuOpen
-        axis.buildSidebar()
-        axis.buildHelpMenu()
-        axis.tileITermWindows()
+        self.helpMenuOpen = not self.helpMenuOpen
+        self:buildSidebar()
+        self:buildHelpMenu()
+        self:tileITermWindows()
         return
     end
 
-    -- Check window buttons
-    for _, btn in ipairs(axis._buttonFrames) do
+    for _, btn in ipairs(self._buttonFrames) do
         if x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
-            axis.bringWindowToFront(btn.windowId)
+            self:bringWindowToFront(btn.windowId)
             return
         end
     end
@@ -424,223 +395,63 @@ end
 -- Drag to Move
 -- ─────────────────────────────────────────────
 
-function axis.startDrag()
+function obj:startDrag()
     local mouse = hs.mouse.absolutePosition()
-    axis.dragStart = { x = mouse.x, y = mouse.y }
-    axis.dragging = true
+    self.dragStart = { x = mouse.x, y = mouse.y }
+    self.dragging = true
 end
 
-function axis.updateDrag()
-    if not axis.dragging then return end
+function obj:updateDrag()
+    if not self.dragging then return end
     local mouse = hs.mouse.absolutePosition()
-    local dx = mouse.x - axis.dragStart.x
-    local dy = mouse.y - axis.dragStart.y
+    local dx = mouse.x - self.dragStart.x
+    local dy = mouse.y - self.dragStart.y
     if dx ~= 0 or dy ~= 0 then
-        axis.moveAllWindows(dx, dy)
-        axis.dragStart = { x = mouse.x, y = mouse.y }
+        self:moveAllWindows(dx, dy)
+        self.dragStart = { x = mouse.x, y = mouse.y }
     end
 end
 
-function axis.stopDrag()
-    axis.dragging = false
+function obj:stopDrag()
+    self.dragging = false
 end
 
 -- ─────────────────────────────────────────────
--- Hotkeys
+-- Window Move/Resize Handler (debounced)
 -- ─────────────────────────────────────────────
 
--- Toggle axis visibility
-hs.hotkey.bind({ "cmd", "shift" }, "A", function()
-    if axis.sidebarCanvas then
-        local isVisible = axis.sidebarCanvas:isVisible()
-        if isVisible then
-            axis.sidebarCanvas:hide()
-            if axis.helpCanvas then axis.helpCanvas:hide() end
-        else
-            axis.buildSidebar()
-            axis.buildHelpMenu()
-            axis.tileITermWindows()
-        end
-    else
-        axis.buildSidebar()
-        axis.buildHelpMenu()
-        axis.tileITermWindows()
+function obj:handleWindowMoveOrResize()
+    if self._resizeDebounceTimer then
+        self._resizeDebounceTimer:stop()
     end
-end)
-
--- New iTerm window
-hs.hotkey.bind({ "cmd", "shift" }, "N", function()
-    local iterm = hs.application.find("iTerm2")
-    if iterm then
-        iterm:activate()
-        hs.eventtap.keyStroke({ "cmd" }, "n")
-        hs.timer.doAfter(0.5, function()
-            axis.buildSidebar()
-            axis.tileITermWindows()
-        end)
-    else
-        hs.application.open("com.googlecode.iterm2")
-        hs.timer.doAfter(1.0, function()
-            axis.buildSidebar()
-            axis.tileITermWindows()
-        end)
-    end
-end)
-
--- Refresh layout
-hs.hotkey.bind({ "cmd", "shift" }, "R", function()
-    axis.buildSidebar()
-    axis.buildHelpMenu()
-    axis.tileITermWindows()
-end)
-
--- ─────────────────────────────────────────────
--- Mouse Event Tap for Sidebar
--- ─────────────────────────────────────────────
-
-if axis._mouseTap then axis._mouseTap:stop() end
-
-axis._mouseTap = hs.eventtap.new(
-    { hs.eventtap.event.types.leftMouseDown, hs.eventtap.event.types.leftMouseDragged, hs.eventtap.event.types.leftMouseUp },
-    function(event)
-        local eventType = event:getType()
-        local mouse = hs.mouse.absolutePosition()
-
-        if not axis.sidebarCanvas then return false end
-        local sf = axis.sidebarCanvas:frame()
-
-        local inMoveArea = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
-            and mouse.y >= sf.y and mouse.y <= sf.y + axis.config.moveButtonHeight
-
-        local inSidebar = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
-            and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
-
-        if eventType == hs.eventtap.event.types.leftMouseDown then
-            if inMoveArea then
-                axis.startDrag()
-                return true
-            elseif inSidebar then
-                local localX = mouse.x - sf.x
-                local localY = mouse.y - sf.y
-                axis.handleSidebarClick(localX, localY)
-                return true
-            end
-        elseif eventType == hs.eventtap.event.types.leftMouseDragged then
-            if axis.dragging then
-                axis.updateDrag()
-                return true
-            end
-        elseif eventType == hs.eventtap.event.types.leftMouseUp then
-            if axis.dragging then
-                axis.stopDrag()
-                return true
-            end
-        end
-
-        return false
-    end
-)
-axis._mouseTap:start()
-
--- ─────────────────────────────────────────────
--- Auto-refresh on window changes
--- ─────────────────────────────────────────────
-
-if axis._winWatcher then axis._winWatcher:stop() end
-
-axis._winWatcher = hs.window.filter.new("iTerm2")
-axis._winWatcher:subscribe("windowCreated", function()
-    hs.timer.doAfter(0.3, function()
-        axis.buildSidebar()
-        axis.tileITermWindows()
-    end)
-end)
-axis._winWatcher:subscribe("windowDestroyed", function()
-    hs.timer.doAfter(0.3, function()
-        axis.buildSidebar()
-    end)
-end)
-axis._winWatcher:subscribe("windowTitleChanged", function()
-    hs.timer.doAfter(0.1, function()
-        axis.buildSidebar()
-    end)
-end)
--- Subscribe to window moved and resized events for immediate response
-axis._winWatcher:subscribe("windowMoved", function()
-    axis.handleWindowMoveOrResize()
-end)
-axis._winWatcher:subscribe("windowResized", function()
-    axis.handleWindowMoveOrResize()
-end)
-
--- ─────────────────────────────────────────────
--- Screen change watcher
--- ─────────────────────────────────────────────
-
-if axis._screenWatcher then axis._screenWatcher:stop() end
-
-axis._screenWatcher = hs.screen.watcher.new(function()
-    hs.timer.doAfter(0.3, function()
-        axis.buildSidebar()
-        axis.buildHelpMenu()
-        axis.tileITermWindows()
-    end)
-end)
-axis._screenWatcher:start()
-
--- Debounced handler for window move/resize events
-axis._resizeDebounceTimer = nil
-
-function axis.handleWindowMoveOrResize()
-    -- Cancel any existing timer
-    if axis._resizeDebounceTimer then
-        axis._resizeDebounceTimer:stop()
-    end
-    
-    -- Set a new timer to execute after a short delay
-    axis._resizeDebounceTimer = hs.timer.doAfter(0.15, function()
-        if axis.dragging then return end
+    self._resizeDebounceTimer = hs.timer.doAfter(0.15, function()
+        if self.dragging then return end
 
         local wins = getITermWindows()
         if #wins == 0 then return end
 
-        -- Detect screen change
-        local winScreen = axis.findWindowScreen(wins)
-        local screenChanged = (winScreen ~= axis._currentScreen)
+        local winScreen   = self:findWindowScreen(wins)
+        local screenChanged = (winScreen ~= self._currentScreen)
+        local layout      = self:computeLayout()
+        local iterm       = layout.iterm
+        local cfg         = self.config
 
-        local layout = axis.computeLayout()
-        local iterm = layout.iterm
-        local cfg = axis.config
-
-        -- Build the "expected" content frame based on where the sidebar
-        -- actually is (if we have one).  After a manual move this will
-        -- match the adjusted position; on a fresh layout it will match
-        -- the full-screen default.
         local expected = nil
-        if axis.sidebarCanvas then
-            local sf = axis.sidebarCanvas:frame()
-            expected = {
-                x = sf.x + sf.w,
-                y = sf.y,
-                w = sf.w > 0 and (iterm.w) or iterm.w,
-                h = sf.h,
-            }
+        if self.sidebarCanvas then
+            local sf = self.sidebarCanvas:frame()
+            expected = { x = sf.x + sf.w, y = sf.y, w = iterm.w, h = sf.h }
         else
             expected = iterm
         end
 
         if screenChanged then
-            axis._currentScreen = winScreen
-            axis.buildSidebar()
-            axis.buildHelpMenu()
-            axis.tileITermWindows()
+            self._currentScreen = winScreen
+            self:buildSidebar()
+            self:buildHelpMenu()
+            self:tileITermWindows()
             return
         end
 
-        -- Find a window that has drifted from the expected content frame.
-        -- Prefer the frontmost drifted window since that's the one the
-        -- user most likely just moved or resized.
-        local driftedWin = nil
         local function isDrifted(win)
             local f = win:frame()
             return math.abs(f.x - expected.x) > 5 or
@@ -648,7 +459,8 @@ function axis.handleWindowMoveOrResize()
                    math.abs(f.w - expected.w) > 5 or
                    math.abs(f.h - expected.h) > 5
         end
-        -- Search front-to-back so the topmost drifted window wins
+
+        local driftedWin = nil
         for i = #wins, 1, -1 do
             if isDrifted(wins[i]) then
                 driftedWin = wins[i]
@@ -657,96 +469,214 @@ function axis.handleWindowMoveOrResize()
         end
 
         if driftedWin then
-            -- Re-read the drifted window's current frame after the move/resize
-            local f = driftedWin:frame()
-
-            -- Step 1: Redraw the sidebar along the left edge of this window
+            local f        = driftedWin:frame()
             local sidebarW = cfg.sidebarWidth
             local sidebarX = f.x
 
-            if axis.sidebarCanvas then
-                axis.sidebarCanvas:setFrame({
-                    x = sidebarX,
-                    y = f.y,
-                    w = sidebarW,
-                    h = f.h,
-                })
+            if self.sidebarCanvas then
+                self.sidebarCanvas:setFrame({ x = sidebarX, y = f.y, w = sidebarW, h = f.h })
             end
-            if axis.helpCanvas then
-                local helpH = axis.helpMenuOpen and cfg.helpMenuHeight or 0
-                axis.helpCanvas:setFrame({
-                    x = sidebarX,
-                    y = f.y + f.h - helpH,
-                    w = sidebarW,
-                    h = helpH,
-                })
+            if self.helpCanvas then
+                local helpH = self.helpMenuOpen and cfg.helpMenuHeight or 0
+                self.helpCanvas:setFrame({ x = sidebarX, y = f.y + f.h - helpH, w = sidebarW, h = helpH })
             end
 
-            -- Step 2: Slide the left edge right by sidebarWidth
             local contentX = sidebarX + sidebarW
             local contentW = f.w - sidebarW
 
-            -- If too narrow to eat into the window, place sidebar
-            -- to the left instead (same logic as before)
             if contentW < 100 then
                 local screenLeft = layout.screenFrame.x
                 sidebarX = f.x - sidebarW
-                if sidebarX < screenLeft then
-                    sidebarX = screenLeft
-                end
+                if sidebarX < screenLeft then sidebarX = screenLeft end
                 contentX = sidebarX + sidebarW
                 contentW = f.x + f.w - contentX
-                -- Reposition sidebar at the clamped location
-                if axis.sidebarCanvas then
-                    axis.sidebarCanvas:setFrame({
-                        x = sidebarX,
-                        y = f.y,
-                        w = sidebarW,
-                        h = f.h,
-                    })
+                if self.sidebarCanvas then
+                    self.sidebarCanvas:setFrame({ x = sidebarX, y = f.y, w = sidebarW, h = f.h })
                 end
-                if axis.helpCanvas then
-                    local helpH = axis.helpMenuOpen and cfg.helpMenuHeight or 0
-                    axis.helpCanvas:setFrame({
-                        x = sidebarX,
-                        y = f.y + f.h - helpH,
-                        w = sidebarW,
-                        h = helpH,
-                    })
+                if self.helpCanvas then
+                    local helpH = self.helpMenuOpen and cfg.helpMenuHeight or 0
+                    self.helpCanvas:setFrame({ x = sidebarX, y = f.y + f.h - helpH, w = sidebarW, h = helpH })
                 end
             end
 
-            -- Step 3: Apply this adjusted frame to ALL iTerm windows
-            local newFrame = {
-                x = contentX,
-                y = f.y,
-                w = contentW,
-                h = f.h,
-            }
-            for _, w in ipairs(wins) do
-                w:setFrame(newFrame)
-            end
+            local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
+            for _, w in ipairs(wins) do w:setFrame(newFrame) end
 
-            -- Step 4: Rebuild sidebar with updated content
-            axis.buildSidebar()
-            axis.buildHelpMenu()
+            self:buildSidebar()
+            self:buildHelpMenu()
 
-            -- Update tracked screen
-            local center = { x = contentX + contentW / 2, y = f.y + f.h / 2 }
+            local center    = { x = contentX + contentW / 2, y = f.y + f.h / 2 }
             local newScreen = hs.screen.find(center)
-            if newScreen then
-                axis._currentScreen = newScreen
-            end
+            if newScreen then self._currentScreen = newScreen end
         end
     end)
 end
 
 -- ─────────────────────────────────────────────
--- Initialize
+-- Spoon API: bindHotkeys
 -- ─────────────────────────────────────────────
 
-axis.buildSidebar()
-axis.buildHelpMenu()
-axis.tileITermWindows()
+--- iTerm2Axis:bindHotkeys(mapping)
+--- Method
+--- Bind hotkeys for iTerm2Axis.
+---
+--- Parameters:
+---  * mapping - A table with keys: toggle, newWindow, refresh
+---    Each value is a table: { modifiers, key }
+---    e.g. { toggle = {{"cmd","shift"}, "A"}, newWindow = {{"cmd","shift"}, "N"}, refresh = {{"cmd","shift"}, "R"} }
+function obj:bindHotkeys(mapping)
+    local map = mapping or {}
 
-hs.alert.show("iTerm2 Axis loaded ✓", 1.5)
+    local toggleMods, toggleKey = table.unpack(map.toggle or {{"cmd","shift"}, "A"})
+    local newWinMods, newWinKey = table.unpack(map.newWindow or {{"cmd","shift"}, "N"})
+    local refreshMods, refreshKey = table.unpack(map.refresh or {{"cmd","shift"}, "R"})
+
+    hs.hotkey.bind(toggleMods, toggleKey, function()
+        if self.sidebarCanvas then
+            if self.sidebarCanvas:isVisible() then
+                self.sidebarCanvas:hide()
+                if self.helpCanvas then self.helpCanvas:hide() end
+            else
+                self:buildSidebar()
+                self:buildHelpMenu()
+                self:tileITermWindows()
+            end
+        else
+            self:buildSidebar()
+            self:buildHelpMenu()
+            self:tileITermWindows()
+        end
+    end)
+
+    hs.hotkey.bind(newWinMods, newWinKey, function()
+        local iterm = hs.application.find("iTerm2")
+        if iterm then
+            iterm:activate()
+            hs.eventtap.keyStroke({"cmd"}, "n")
+            hs.timer.doAfter(0.5, function()
+                self:buildSidebar()
+                self:tileITermWindows()
+            end)
+        else
+            hs.application.open("com.googlecode.iterm2")
+            hs.timer.doAfter(1.0, function()
+                self:buildSidebar()
+                self:tileITermWindows()
+            end)
+        end
+    end)
+
+    hs.hotkey.bind(refreshMods, refreshKey, function()
+        self:buildSidebar()
+        self:buildHelpMenu()
+        self:tileITermWindows()
+    end)
+end
+
+-- ─────────────────────────────────────────────
+-- Spoon API: start / stop
+-- ─────────────────────────────────────────────
+
+--- iTerm2Axis:start()
+--- Method
+--- Start iTerm2Axis: build UI, attach watchers, and start mouse tap.
+function obj:start()
+    -- Mouse tap
+    if self._mouseTap then self._mouseTap:stop() end
+    self._mouseTap = hs.eventtap.new(
+        {
+            hs.eventtap.event.types.leftMouseDown,
+            hs.eventtap.event.types.leftMouseDragged,
+            hs.eventtap.event.types.leftMouseUp,
+        },
+        function(event)
+            local eventType = event:getType()
+            local mouse     = hs.mouse.absolutePosition()
+
+            if not self.sidebarCanvas then return false end
+            local sf = self.sidebarCanvas:frame()
+
+            local inMoveArea = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
+                and mouse.y >= sf.y and mouse.y <= sf.y + self.config.moveButtonHeight
+            local inSidebar = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
+                and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
+
+            if eventType == hs.eventtap.event.types.leftMouseDown then
+                if inMoveArea then
+                    self:startDrag()
+                    return true
+                elseif inSidebar then
+                    self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y)
+                    return true
+                end
+            elseif eventType == hs.eventtap.event.types.leftMouseDragged then
+                if self.dragging then self:updateDrag(); return true end
+            elseif eventType == hs.eventtap.event.types.leftMouseUp then
+                if self.dragging then self:stopDrag(); return true end
+            end
+            return false
+        end
+    )
+    self._mouseTap:start()
+
+    -- Window watcher
+    -- NOTE: hs.window.filter does not support "windowResized" as an event.
+    -- Use "windowMoved" to detect layout drift, which covers most resize-via-drag
+    -- cases. For true resize events, an hs.uielement.watcher would be needed.
+    if self._winWatcher then self._winWatcher:stop() end
+    self._winWatcher = hs.window.filter.new("iTerm2")
+    self._winWatcher:subscribe("windowCreated", function()
+        hs.timer.doAfter(0.3, function() self:buildSidebar(); self:tileITermWindows() end)
+    end)
+    self._winWatcher:subscribe("windowDestroyed", function()
+        hs.timer.doAfter(0.3, function() self:buildSidebar() end)
+    end)
+    self._winWatcher:subscribe("windowTitleChanged", function()
+        hs.timer.doAfter(0.1, function() self:buildSidebar() end)
+    end)
+    self._winWatcher:subscribe("windowMoved", function()
+        self:handleWindowMoveOrResize()
+    end)
+
+    -- Screen watcher
+    if self._screenWatcher then self._screenWatcher:stop() end
+    self._screenWatcher = hs.screen.watcher.new(function()
+        hs.timer.doAfter(0.3, function()
+            self:buildSidebar()
+            self:buildHelpMenu()
+            self:tileITermWindows()
+        end)
+    end)
+    self._screenWatcher:start()
+
+    -- Build initial UI
+    self:buildSidebar()
+    self:buildHelpMenu()
+    self:tileITermWindows()
+
+    hs.alert.show("iTerm2 Axis loaded ✓", 1.5)
+    return self
+end
+
+--- iTerm2Axis:stop()
+--- Method
+--- Stop iTerm2Axis: tear down UI and watchers.
+function obj:stop()
+    if self._mouseTap    then self._mouseTap:stop();    self._mouseTap    = nil end
+    if self._winWatcher  then self._winWatcher:stop();  self._winWatcher  = nil end
+    if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
+    if self.sidebarCanvas  then self.sidebarCanvas:delete();  self.sidebarCanvas  = nil end
+    if self.helpCanvas     then self.helpCanvas:delete();     self.helpCanvas     = nil end
+    return self
+end
+
+--- iTerm2Axis:init()
+--- Method
+--- Called automatically by hs.loadSpoon(). Sets up the Spoon but does not
+--- start watchers or build UI. Call :start() (and optionally :bindHotkeys())
+--- to activate.
+function obj:init()
+    return self
+end
+
+return obj
