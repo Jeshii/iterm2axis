@@ -1,5 +1,5 @@
 --- iTerm2Axis - Hammerspoon Window Manager Spoon
---- A left-side sidebar for managing stacked iTerm2 windows, emulating tmux-like layout.
+--- A left-side sidebar for managing stacked iTerm2 windows, emulating cmux-like layout.
 ---
 --- Download: [https://github.com/Jeshii/iterm2axis](https://github.com/Jeshii/iterm2axis)
 --- @author Jesse Fuller
@@ -27,24 +27,6 @@ obj.config = {
     windowButtonHeight = 36,
     padding           = 8,
 }
-
--- State
-obj.windows        = {}
-obj.sidebarCanvas  = nil
-obj.helpCanvas     = nil
-obj.isHelpVisible  = false
-obj.activeWindowId = nil
-obj.dragging       = false
-obj.dragStart      = { x = 0, y = 0 }
-obj.sidebarStart   = { x = 0, y = 0, w = 0, h = 0 }
-obj.helpMenuOpen   = false
-obj._currentScreen = nil
-obj._buttonFrames  = {}
-obj._helpButtonFrame = nil
-obj._resizeDebounceTimer = nil
-obj._mouseTap      = nil
-obj._winWatcher    = nil
-obj._screenWatcher = nil
 
 -- ─────────────────────────────────────────────
 -- Helpers
@@ -676,6 +658,22 @@ end
 --- start watchers or build UI. Call :start() (and optionally :bindHotkeys())
 --- to activate.
 function obj:init()
+    self.windows        = {}
+    self.sidebarCanvas  = nil
+    self.helpCanvas     = nil
+    self.isHelpVisible  = false
+    self.activeWindowId = nil
+    self.dragging       = false
+    self.dragStart      = { x = 0, y = 0 }
+    self.sidebarStart   = { x = 0, y = 0, w = 0, h = 0 }
+    self.helpMenuOpen   = false
+    self._currentScreen = nil
+    self._buttonFrames  = {}
+    self._helpButtonFrame = nil
+    self._resizeDebounceTimer = nil
+    self._mouseTap      = nil
+    self._winWatcher    = nil
+    self._screenWatcher = nil
     return self
 end
 
