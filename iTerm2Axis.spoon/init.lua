@@ -320,7 +320,10 @@ end
 function obj:tileITermWindows()
     if not self.sidebarCanvas then return end
     local sf = self.sidebarCanvas:frame()
-    local newFrame = { x = sf.x + sf.w, y = sf.y, w = ..., h = sf.h }
+    local screen = self:getScreen()
+    local screenFrame = screen:frame()
+    local contentW = (screenFrame.x + screenFrame.w) - (sf.x + sf.w)
+    local newFrame = { x = sf.x + sf.w, y = sf.y, w = contentW, h = sf.h }
     for _, win in ipairs(getITermWindows()) do
         win:setFrame(newFrame)
     end
@@ -408,11 +411,12 @@ function obj:watchWindow(win)
     local id = win:id()
     if self._windowWatchers[id] then return end
     local watcher = win:newWatcher(function(element, event)
-        if event == hs.uielement.watcher.windowResized then
+        if event == hs.uielement.watcher.windowResized
+        or event == hs.uielement.watcher.windowMoved then
             self:handleWindowMoveOrResize()
         end
     end, self)
-    watcher:start({ 
+    watcher:start({
         hs.uielement.watcher.windowResized,
         hs.uielement.watcher.windowMoved,
     })
