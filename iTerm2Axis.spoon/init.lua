@@ -82,25 +82,30 @@ function obj:getScreen()
     return screen
 end
 
-function obj:computeLayout()
+function obj:getSidebarAnchor()
+    if self._pendingSidebarFrame then
+        return self._pendingSidebarFrame
+    end
+    if self.sidebarCanvas then
+        return self.sidebarCanvas:frame()
+    end
     local screen = self:getScreen()
     local f = screen:frame()
-    local cfg = self.config
+    return { x = f.x, y = f.y, w = self.config.sidebarWidth, h = f.h }
+end
 
-    local sidebarX = f.x
-    if self.sidebarCanvas then
-        local sf = self.sidebarCanvas:frame()
-        if math.abs(sf.y - f.y) < f.h then
-            sidebarX = sf.x
-        end
-    end
+function obj:computeLayout()
+    local anchor = self:getSidebarAnchor()
+    local screen = self:getScreen()
+    local f      = screen:frame()
+    local cfg    = self.config
 
-    local sidebar = { x = sidebarX, y = f.y, w = cfg.sidebarWidth, h = f.h }
+    local sidebar = { x = anchor.x, y = anchor.y, w = cfg.sidebarWidth, h = anchor.h }
     local iterm   = {
-        x = sidebarX + cfg.sidebarWidth,
-        y = f.y,
-        w = f.w - cfg.sidebarWidth - (sidebarX - f.x),
-        h = f.h,
+        x = anchor.x + cfg.sidebarWidth,
+        y = anchor.y,
+        w = (f.x + f.w) - (anchor.x + cfg.sidebarWidth),
+        h = anchor.h,
     }
     local helpH = self.helpMenuOpen and cfg.helpMenuHeight or 0
 
@@ -242,6 +247,7 @@ function obj:buildSidebar()
     }
 
     self.sidebarCanvas = canvas
+    self._pendingSidebarFrame = nil
     canvas:show()
 end
 
@@ -428,53 +434,39 @@ end
 -- ─────────────────────────────────────────────
 
 function obj:handleWindowMoveOrResize()
-    hs.alert.show("move/resize detected", 0.5)
     if self._resizeDebounceTimer then
         self._resizeDebounceTimer:stop()
     end
-    self._resizeDebounceTimer = hs.timer.doAfter(0.15, function()
+    self._resizeDebounceTimer = hs.timer.doAfter(0.3, function()
         if self.dragging then return end
 
         local wins = getITermWindows()
         if #wins == 0 then return end
 
-        local winScreen   = self:findWindowScreen(wins)
+        local winScreen     = self:findWindowScreen(wins)
         local screenChanged = (winScreen ~= self._currentScreen)
-        local layout      = self:computeLayout()
-        local iterm       = layout.iterm
-        local cfg         = self.config
-
-        local expected = nil
-        if self.sidebarCanvas then
-            local sf = self.sidebarCanvas:frame()
-            expected = { x = sf.x + sf.w, y = sf.y, w = iterm.w, h = sf.h }
-        else
-            expected = iterm
-        end
+        local cfg           = self.config
 
         if screenChanged then
-            self._currentScreen = winScreen
+            self._currentScreen       = winScreen
+            self._pendingSidebarFrame = nil
             self:buildSidebar()
             self:buildHelpMenu()
             self:tileITermWindows()
             return
         end
 
-        local function isDrifted(win)
-            local f = win:frame()
-            hs.alert.show(string.format(
-                "win: %.0f,%.0f  expected: %.0f,%.0f",
-                f.x, f.y, expected.x, expected.y
-            ), 2)
-            return math.abs(f.x - expected.x) > 5 or
-                   math.abs(f.y - expected.y) > 5 or
-                   math.abs(f.w - expected.w) > 5 or
-                   math.abs(f.h - expected.h) > 5
-        end
+        local currentAnchor = self:getSidebarAnchor()
+        local expectedX = currentAnchor.x + cfg.sidebarWidth
+        local expectedY = currentAnchor.y
+        local expectedH = currentAnchor.h
 
         local driftedWin = nil
         for i = #wins, 1, -1 do
-            if isDrifted(wins[i]) then
+            local f = wins[i]:frame()
+            if math.abs(f.x - expectedX) > 5
+            or math.abs(f.y - expectedY) > 5
+            or math.abs(f.h - expectedH) > 5 then
                 driftedWin = wins[i]
                 break
             end
@@ -482,44 +474,26 @@ function obj:handleWindowMoveOrResize()
 
         if driftedWin then
             local f        = driftedWin:frame()
+            local sf       = winScreen:frame()
             local sidebarW = cfg.sidebarWidth
-            local sidebarX = f.x - cfg.sidebarWidth
+            local sidebarX = f.x - sidebarW
 
-            if self.sidebarCanvas then
-                self.sidebarCanvas:setFrame({ x = sidebarX, y = f.y, w = sidebarW, h = f.h })
-            end
-            if self.helpCanvas then
-                local helpH = self.helpMenuOpen and cfg.helpMenuHeight or 0
-                self.helpCanvas:setFrame({ x = sidebarX, y = f.y + f.h - helpH, w = sidebarW, h = helpH })
-            end
+            -- Clamp: don't go off left edge of screen
+            if sidebarX < sf.x then sidebarX = sf.x end
 
+            -- Set pending frame so buildSidebar/computeLayout use new position
+            self._pendingSidebarFrame = { x = sidebarX, y = f.y, w = sidebarW, h = f.h }
+            self._currentScreen = winScreen
+
+            -- Tile all windows into the space right of the new sidebar position
             local contentX = sidebarX + sidebarW
-            local contentW = f.w - sidebarW
-
-            if contentW < 100 then
-                local screenLeft = layout.screenFrame.x
-                sidebarX = f.x - sidebarW
-                if sidebarX < screenLeft then sidebarX = screenLeft end
-                contentX = sidebarX + sidebarW
-                contentW = f.x + f.w - contentX
-                if self.sidebarCanvas then
-                    self.sidebarCanvas:setFrame({ x = sidebarX, y = f.y, w = sidebarW, h = f.h })
-                end
-                if self.helpCanvas then
-                    local helpH = self.helpMenuOpen and cfg.helpMenuHeight or 0
-                    self.helpCanvas:setFrame({ x = sidebarX, y = f.y + f.h - helpH, w = sidebarW, h = helpH })
-                end
-            end
-
+            local contentW = (sf.x + sf.w) - contentX
             local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
             for _, w in ipairs(wins) do w:setFrame(newFrame) end
 
+            -- Rebuild canvases at the new position
             self:buildSidebar()
             self:buildHelpMenu()
-
-            local center    = { x = contentX + contentW / 2, y = f.y + f.h / 2 }
-            local newScreen = hs.screen.find(center)
-            if newScreen then self._currentScreen = newScreen end
         end
     end)
 end
@@ -718,6 +692,7 @@ function obj:init()
     self._buttonFrames  = {}
     self._helpButtonFrame = nil
     self._resizeDebounceTimer = nil
+    self._pendingSidebarFrame = nil
     self._mouseTap       = nil
     self._winWatcher     = nil
     self._screenWatcher  = nil
