@@ -318,10 +318,11 @@ end
 -- ─────────────────────────────────────────────
 
 function obj:tileITermWindows()
-    local layout     = self:computeLayout()
-    local itermFrame = layout.iterm
+    if not self.sidebarCanvas then return end
+    local sf = self.sidebarCanvas:frame()
+    local newFrame = { x = sf.x + sf.w, y = sf.y, w = ..., h = sf.h }
     for _, win in ipairs(getITermWindows()) do
-        win:setFrame({ x = itermFrame.x, y = itermFrame.y, w = itermFrame.w, h = itermFrame.h })
+        win:setFrame(newFrame)
     end
 end
 
@@ -411,7 +412,10 @@ function obj:watchWindow(win)
             self:handleWindowMoveOrResize()
         end
     end, self)
-    watcher:start({ hs.uielement.watcher.windowResized })
+    watcher:start({ 
+        hs.uielement.watcher.windowResized,
+        hs.uielement.watcher.windowMoved,
+    })
     self._windowWatchers[id] = watcher
 end
 
@@ -420,6 +424,7 @@ end
 -- ─────────────────────────────────────────────
 
 function obj:handleWindowMoveOrResize()
+    hs.alert.show("move/resize detected", 0.5)
     if self._resizeDebounceTimer then
         self._resizeDebounceTimer:stop()
     end
@@ -453,6 +458,10 @@ function obj:handleWindowMoveOrResize()
 
         local function isDrifted(win)
             local f = win:frame()
+            hs.alert.show(string.format(
+                "win: %.0f,%.0f  expected: %.0f,%.0f",
+                f.x, f.y, expected.x, expected.y
+            ), 2)
             return math.abs(f.x - expected.x) > 5 or
                    math.abs(f.y - expected.y) > 5 or
                    math.abs(f.w - expected.w) > 5 or
@@ -470,7 +479,7 @@ function obj:handleWindowMoveOrResize()
         if driftedWin then
             local f        = driftedWin:frame()
             local sidebarW = cfg.sidebarWidth
-            local sidebarX = f.x
+            local sidebarX = f.x - cfg.sidebarWidth
 
             if self.sidebarCanvas then
                 self.sidebarCanvas:setFrame({ x = sidebarX, y = f.y, w = sidebarW, h = f.h })
