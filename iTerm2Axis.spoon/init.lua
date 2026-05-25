@@ -205,7 +205,7 @@ local function getOpenPRForWindow(win)
     if not parts.fullPath then _prCache[winId] = false; return nil end
 
     local result = hs.execute(
-        "cd '" .. parts.fullPath .. "' && gh pr view --json number,title 2>/dev/null"
+        "cd '" .. parts.fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"
     )
     local ok, pr = pcall(hs.json.decode, result or "")
     if ok and pr and pr.number then
@@ -360,6 +360,9 @@ end
 
 function obj:startClaudeCodePolling()
     self:fetchClaudeCodeData()
+    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+        self:buildSidebar()
+    end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop() end
     self._claudeCodePollTimer = hs.timer.new(self.config.claudecode.pollInterval, function()
         self:fetchClaudeCodeData()
