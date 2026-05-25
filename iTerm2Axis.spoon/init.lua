@@ -54,47 +54,54 @@ local function color(c)
     return { red = c.red, green = c.green, blue = c.blue, alpha = c.alpha }
 end
 
-local function getSessionGitInfo()
-    local tmp = os.tmpname() .. ".sh"
-    local f = io.open(tmp, "w")
-    if not f then return {} end
-    f:write([[
-#!/bin/bash
-ITER_PID=$(pgrep -x iTerm2)
-[ -z "$ITER_PID" ] && exit 0
-ps -eo ppid,pid,comm | awk -v target="$ITER_PID" '
-{ parent[$2]=$1; comm[$2]=$3 }
-END {
-    for (pid in parent) {
-        p = pid; while (p in parent && p != target && p != 1) p = parent[p]
-        if (p == target && comm[pid] ~ /-(zsh|bash|fish)$/) print pid
-    }
-}' | while read pid; do
-    cwd=$(lsof -p "$pid" -d cwd -Fn 2>/dev/null | tail -1 | cut -c2-)
-    [ -n "$cwd" ] && echo "$cwd"
-done | sort -u | while read dir; do
-    branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
-    [ -n "$branch" ] && echo "$dir|$branch"
-done
-]])
-    f:close()
-    local out, ok, exitType, exitCode = hs.execute("bash " .. tmp, true)
-    os.remove(tmp)
-    if not out or out == "" then return {} end
+-- Per-window git branch cache, keyed by windowId.
+-- Only re-runs `git rev-parse` when a window's title actually changes.
+local _gitBranchCache = {}  -- [windowId] = branch string or false
+local _gitTitleCache  = {}  -- [windowId] = last title seen
 
-    local map = {}
-    for line in out:gmatch("[^\n]+") do
-        local dir, branch = line:match("^(.-)|(.+)$")
-        if dir and branch then
-            local basename = dir:match("/([^/]+)$")
-            map[basename] = branch
+local function getGitBranchForWindow(win)
+    if not win then return nil end
+    local winId = win:id()
+    local title = win:title() or ""
+
+    -- Return cached value if title hasn't changed
+    if _gitTitleCache[winId] == title then
+        return _gitBranchCache[winId] or nil
+    end
+
+    -- Title changed (or first run) — update caches
+    _gitTitleCache[winId] = title
+
+    -- iTerm2 titles typically end with the current directory name, e.g.:
+    --   "user@host: ~/projects/myrepo"  →  extract "myrepo"
+    --   "myrepo"                         →  extract "myrepo"
+    -- We grab the last path component after stripping trailing whitespace.
+    local dir = title:match("([^/: \t]+)%s*$")
+    if not dir or dir == "" then
+        _gitBranchCache[winId] = false
+        return nil
+    end
+
+    -- Try the extracted name as a subdirectory of $HOME first, then as an absolute path.
+    local home = os.getenv("HOME") or ""
+    local branch = hs.execute(
+        "git -C " .. home .. "/" .. dir .. " rev-parse --abbrev-ref HEAD 2>/dev/null"
+    )
+    if not branch or branch:gsub("%s+", "") == "" then
+        -- Fallback: maybe the full path appears in the title
+        local fullDir = title:match("(/.+[^%s])%s*$")
+        if fullDir then
+            branch = hs.execute(
+                "git -C '" .. fullDir .. "' rev-parse --abbrev-ref HEAD 2>/dev/null"
+            )
         end
     end
-    return map
-end
 
-local _gitBranches = {}
-local _gitTimer
+    branch = branch and branch:gsub("%s+$", "")
+    local result = (branch and branch ~= "") and branch or false
+    _gitBranchCache[winId] = result
+    return result or nil
+end
 
 -- ─────────────────────────────────────────────
 -- Layout
@@ -222,8 +229,6 @@ function obj:buildSidebar()
          itermWins = ordered
      end
 
-     local gitBranches = _gitBranches
-
      for i, win in ipairs(itermWins) do
         local winId   = win:id()
         local isActive = (winId == self.activeWindowId)
@@ -249,14 +254,8 @@ function obj:buildSidebar()
             textAlignment = "left",
         })
 
-        local branch
-        local title = win:title()
-        for basename, br in pairs(gitBranches) do
-            if title:find(basename, 1, true) then
-                branch = br
-                break
-            end
-        end
+        -- Lightweight: reads from per-window cache populated by windowTitleChanged
+        local branch = getGitBranchForWindow(win)
         if branch then
             if #branch > 22 then branch = branch:sub(1, 20) .. "…" end
             canvas:appendElements({
@@ -751,13 +750,23 @@ function obj:start()
     end)
     self._winWatcher:subscribe("windowDestroyed", function(win)
         local id = win and win:id()
-        if id and self._windowWatchers[id] then
-            self._windowWatchers[id]:stop()
-            self._windowWatchers[id] = nil
+        if id then
+            if self._windowWatchers[id] then
+                self._windowWatchers[id]:stop()
+                self._windowWatchers[id] = nil
+            end
+            -- Clear git cache for destroyed window
+            _gitBranchCache[id] = nil
+            _gitTitleCache[id]  = nil
         end
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
     end)
-    self._winWatcher:subscribe("windowTitleChanged", function()
+    self._winWatcher:subscribe("windowTitleChanged", function(win)
+        -- Invalidate the git cache for this window so getGitBranchForWindow re-checks
+        if win then
+            local id = win:id()
+            _gitTitleCache[id] = nil  -- force re-evaluation on next buildSidebar
+        end
         hs.timer.doAfter(0.1, function() self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowMoved", function()
@@ -784,19 +793,9 @@ function obj:start()
     end)
     self._screenWatcher:start()
 
-    -- Build initial UI
+    -- Build initial UI (git info populated lazily on first buildSidebar)
     self:buildSidebar()
     self:tileITermWindows()
-
-    -- Refresh git branches in background every 5s
-    _gitBranches = getSessionGitInfo()
-    _gitTimer = hs.timer.new(5, function()
-        _gitBranches = getSessionGitInfo()
-        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-            self:buildSidebar()
-        end
-    end)
-    _gitTimer:start()
 
     hs.alert.show("iTerm2 Axis loaded ✓", 1.5)
     return self
@@ -816,7 +815,8 @@ function obj:stop()
      if self.sidebarCanvas   then self.sidebarCanvas:delete();   self.sidebarCanvas   = nil end
      if self._tipCanvas      then self._tipCanvas:delete();      self._tipCanvas      = nil end
      if self._tipKey         then self._tipKey:delete();         self._tipKey         = nil end
-     if _gitTimer            then _gitTimer:stop();              _gitTimer            = nil end
+     _gitBranchCache = {}
+     _gitTitleCache  = {}
      return self
 end
 
@@ -838,11 +838,11 @@ function obj:init()
     self._screenWatcher  = nil
     self._tipCanvas      = nil
     self._tipKey         = nil
-    _gitBranches         = {}
-    _gitTimer            = nil
      self._windowWatchers    = {}
      self._customNames       = {}
      self._orderedWindowIds  = {}
+     _gitBranchCache         = {}
+     _gitTitleCache          = {}
      return self
 end
 
