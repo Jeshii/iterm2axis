@@ -72,27 +72,29 @@ local function getGitBranchForWindow(win)
     -- Title changed (or first run) — update caches
     _gitTitleCache[winId] = title
 
-    -- iTerm2 titles typically end with the current directory name, e.g.:
-    --   "user@host: ~/projects/myrepo"  →  extract "myrepo"
-    --   "myrepo"                         →  extract "myrepo"
-    -- We grab the last path component after stripping trailing whitespace.
-    local dir = title:match("([^/: \t]+)%s*$")
-    if not dir or dir == "" then
-        _gitBranchCache[winId] = false
-        return nil
+    local home = os.getenv("HOME") or ""
+    local branch
+
+    -- Strategy 1: extract a full path from the title.
+    -- Handles formats produced by iTerm2 shell integration + PWD title component:
+    --   "user@host: /Users/you/projects/myrepo"  →  /Users/you/projects/myrepo
+    --   "user@host: ~/projects/myrepo"           →  ~/projects/myrepo  (expanded)
+    --   "/Users/you/projects/myrepo"             →  direct absolute path
+    --   "~/projects/myrepo"                      →  expanded tilde path
+    local fullPath = title:match("%s(~?/[^%s]+)%s*$") or title:match("^(~?/[^%s]+)%s*$")
+    if fullPath then
+        -- Expand leading ~ to $HOME
+        fullPath = fullPath:gsub("^~", home)
+        branch = hs.execute("git -C '" .. fullPath .. "' rev-parse --abbrev-ref HEAD 2>/dev/null")
     end
 
-    -- Try the extracted name as a subdirectory of $HOME first, then as an absolute path.
-    local home = os.getenv("HOME") or ""
-    local branch = hs.execute(
-        "git -C " .. home .. "/" .. dir .. " rev-parse --abbrev-ref HEAD 2>/dev/null"
-    )
+    -- Strategy 2: fall back to treating the last path component as a dirname under $HOME.
+    -- Handles plain titles like "myrepo" or "-zsh" (the latter will just return nothing).
     if not branch or branch:gsub("%s+", "") == "" then
-        -- Fallback: maybe the full path appears in the title
-        local fullDir = title:match("(/.+[^%s])%s*$")
-        if fullDir then
+        local basename = title:match("([^%s/:]+)%s*$")
+        if basename and basename ~= "" then
             branch = hs.execute(
-                "git -C '" .. fullDir .. "' rev-parse --abbrev-ref HEAD 2>/dev/null"
+                "git -C '" .. home .. "/" .. basename .. "' rev-parse --abbrev-ref HEAD 2>/dev/null"
             )
         end
     end
