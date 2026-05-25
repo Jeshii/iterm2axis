@@ -23,13 +23,19 @@ obj.config = {
     activeButtonColor = { red = 0.25, green = 0.5,  blue = 0.8,  alpha = 1 },
     textColor         = { red = 0.9,  green = 0.9,  blue = 0.9,  alpha = 1 },
 
-    windowButtonHeight = 74,  -- tall enough for 4 lines (opencode)
+    windowButtonHeight = 90,  -- tall enough for 5 lines (opencode + claudecode)
     padding           = 8,
 
     opencode = {
         enabled      = true,
         port         = 4096,
         pollInterval = 5,
+    },
+
+    claudecode = {
+        enabled      = true,
+        pollInterval = 5,
+        projectsDir  = os.getenv("HOME") .. "/.claude/projects",
     },
 }
 
@@ -168,6 +174,48 @@ local function fmtTokens(n)
     return tostring(n)
 end
 
+-- ─────────────────────────────────────────────
+-- Claude Code helpers
+-- ─────────────────────────────────────────────
+
+local function claudeEncodeDir(absPath)
+    return absPath:gsub("^/", ""):gsub("/", "-")
+end
+
+local function claudeProjectDir(absPath)
+    return os.getenv("HOME") .. "/.claude/projects/" .. claudeEncodeDir(absPath)
+end
+
+-- Per-window PR cache, keyed by windowId.
+local _prCache       = {}  -- [windowId] = { number, title } or false
+local _prBranchCache = {}  -- [windowId] = branch string last checked
+
+local function getOpenPRForWindow(win)
+    if not win then return nil end
+    local winId  = win:id()
+    local branch = getGitBranchForWindow(win)
+    if not branch then _prCache[winId] = false; return nil end
+
+    if _prBranchCache[winId] == branch then
+        return _prCache[winId] or nil
+    end
+    _prBranchCache[winId] = branch
+
+    local parts = parseTitleComponents(win:title() or "")
+    if not parts.fullPath then _prCache[winId] = false; return nil end
+
+    local result = hs.execute(
+        "cd '" .. parts.fullPath .. "' && gh pr view --json number,title 2>/dev/null"
+    )
+    local ok, pr = pcall(hs.json.decode, result or "")
+    if ok and pr and pr.number then
+        _prCache[winId] = pr
+        return pr
+    end
+    _prCache[winId] = false
+    return nil
+end
+
 function obj:fetchOpenCodeData()
     local newData = {}
     local loaded = false
@@ -260,6 +308,66 @@ function obj:startOpenCodePolling()
         end
     end)
     self._opencodePollTimer:start()
+end
+
+function obj:fetchClaudeCodeData()
+    local newData = {}
+
+    local wins = getITermWindows()
+    for _, win in ipairs(wins) do
+        local parts = parseTitleComponents(win:title() or "")
+        if not parts.fullPath then goto continue end
+
+        local projectDir = claudeProjectDir(parts.fullPath)
+        local latestFile = hs.execute(
+            "ls -t '" .. projectDir .. "'/*.jsonl 2>/dev/null | head -1"
+        ):gsub("%s+$", "")
+
+        if latestFile == "" then goto continue end
+
+        local content = hs.execute("tail -50 '" .. latestFile .. "' 2>/dev/null")
+        local model, tokensIn, tokensOut = nil, 0, 0
+
+        for line in content:gmatch("[^\n]+") do
+            local ok, msg = pcall(hs.json.decode, line)
+            if ok and type(msg) == "table" then
+                if msg.type == "assistant" and msg.message then
+                    if msg.message.model then
+                        model = msg.message.model
+                    end
+                    if msg.message.usage then
+                        local u = msg.message.usage
+                        tokensIn  = tokensIn  + (u.input_tokens  or 0)
+                        tokensOut = tokensOut + (u.output_tokens or 0)
+                    end
+                end
+            end
+        end
+
+        if model or tokensIn > 0 then
+            newData[parts.fullPath] = {
+                model     = model,
+                tokensIn  = tokensIn,
+                tokensOut = tokensOut,
+            }
+        end
+
+        ::continue::
+    end
+
+    self._claudeCodeData = newData
+end
+
+function obj:startClaudeCodePolling()
+    self:fetchClaudeCodeData()
+    if self._claudeCodePollTimer then self._claudeCodePollTimer:stop() end
+    self._claudeCodePollTimer = hs.timer.new(self.config.claudecode.pollInterval, function()
+        self:fetchClaudeCodeData()
+        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self:buildSidebar()
+        end
+    end)
+    self._claudeCodePollTimer:start()
 end
 
 -- ─────────────────────────────────────────────
@@ -481,6 +589,32 @@ function obj:buildSidebar()
                 frame         = { x = textX, y = y + 53, w = textW, h = 12 },
                 text          = ocText,
                 textColor     = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
+                textSize      = 9,
+                textAlignment = "left",
+            })
+        end
+
+        -- ── Line 5: Claude Code session info ──
+        local ccData = self._claudeCodeData and self._claudeCodeData[parts.fullPath]
+        if ccData then
+            local modelShort = shortModelName(ccData.model) or ""
+            local tokStr = ""
+            if ccData.tokensIn > 0 then
+                tokStr = fmtTokens(ccData.tokensIn) .. "▲ " .. fmtTokens(ccData.tokensOut) .. "▼"
+            end
+            local pr = self._ghAvailable and getOpenPRForWindow(win) or nil
+            local prStr = pr and ("#" .. pr.number) or ""
+            local segments = {}
+            if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
+            if tokStr     ~= "" then table.insert(segments, tokStr) end
+            if prStr      ~= "" then table.insert(segments, prStr) end
+            local ccText = table.concat(segments, "  ")
+            if #ccText > 26 then ccText = ccText:sub(1, 24) .. "…" end
+            canvas:appendElements({
+                type          = "text",
+                frame         = { x = textX, y = y + 68, w = textW, h = 12 },
+                text          = ccText,
+                textColor     = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
                 textSize      = 9,
                 textAlignment = "left",
             })
@@ -966,6 +1100,8 @@ function obj:start()
             end
             _gitBranchCache[id] = nil
             _gitTitleCache[id]  = nil
+            _prCache[id]       = nil
+            _prBranchCache[id] = nil
         end
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
     end)
@@ -1000,8 +1136,14 @@ function obj:start()
     self:buildSidebar()
     self:tileITermWindows()
 
+    self._ghAvailable = (hs.execute("which gh 2>/dev/null"):gsub("%s+$", "") ~= "")
+
     if self.config.opencode.enabled then
         self:startOpenCodePolling()
+    end
+
+    if self.config.claudecode.enabled then
+        self:startClaudeCodePolling()
     end
 
     hs.alert.show("iTerm2 Axis loaded ✓", 1.5)
@@ -1019,7 +1161,10 @@ function obj:stop()
     if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
     _gitBranchCache = {}
     _gitTitleCache  = {}
+    _prCache       = {}
+    _prBranchCache = {}
     if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
+    if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     return self
 end
 
@@ -1041,8 +1186,13 @@ function obj:init()
     self._orderedWindowIds = {}
     self._opencodeData     = {}
     self._opencodePollTimer = nil
+    self._claudeCodeData      = {}
+    self._claudeCodePollTimer = nil
+    self._ghAvailable         = false
     _gitBranchCache        = {}
     _gitTitleCache         = {}
+    _prCache               = {}
+    _prBranchCache         = {}
     return self
 end
 
