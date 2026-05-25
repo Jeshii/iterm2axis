@@ -10,17 +10,21 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 
 - A floating sidebar canvas is drawn on the left side of the screen.
 - All iTerm2 windows are tiled to fill the remaining space to the right of the sidebar.
-- Each iTerm window is listed as a button in the sidebar; clicking raises that window to the top of the stack.
-- A "Move" button at the top of the sidebar lets you drag the entire setup (sidebar + all iTerm windows) together.
-- A "Help" toggle at the bottom shows keyboard shortcuts and custom commands.
-- Auto-refreshes on iTerm window create/destroy/title-change events.
-- Follows moved or resized windows intelligently.
+- Each iTerm window is listed as a button in the sidebar with its git branch subtitle; clicking raises that window.
+- Right-click on any sidebar button opens a context menu (`hs.chooser`) with actions: Rename, Move Up/Down/ToTop/ToBottom, Refresh Layout, Show/Hide Axis, iTerm Settings Tip.
+- The sidebar snap formula: `sidebarX = math.max(f.x, sf.x)`; the iTerm window shrinks from its left edge so its right edge stays anchored.
+- If a window is dragged off the sidebar's range (by more than sidebar width), the sidebar reattaches to the next overlapping window.
 
 ## Hotkeys
 
 - `⌘⇧A` — Show/hide the sidebar
 - `⌘⇧N` — New iTerm window (auto-tiled)
 - `⌘⇧R` — Refresh layout
+- `⌘⇧W` — Rename selected window
+- `⌘⇧[` — Move selected window up in sidebar
+- `⌘⇧]` — Move selected window down in sidebar
+- `⌘⇧↑` — Move selected window to top of sidebar
+- `⌘⇧↓` — Move selected window to bottom of sidebar
 
 ## Important Rules
 

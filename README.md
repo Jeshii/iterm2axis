@@ -4,10 +4,9 @@ A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floatin
 
 ## Features
 
-- Floating sidebar showing all open iTerm2 windows
+- Floating sidebar showing all open iTerm2 windows with git branch subtitles
 - Click any window button to bring it to the front
-- Drag the **Move** handle to reposition the sidebar + windows together
-- Help panel with configurable shortcut reference
+- Right-click any window for a context menu: Rename, Reorder, Refresh, Show/Hide Axis, iTerm Settings Tip
 - Auto-refreshes on window open/close/title change and screen layout changes
 
 ## Installation
@@ -22,6 +21,11 @@ spoon.iTerm2Axis:bindHotkeys({
     toggle     = {{"cmd", "shift"}, "A"},
     newWindow  = {{"cmd", "shift"}, "N"},
     refresh    = {{"cmd", "shift"}, "R"},
+    rename     = {{"cmd", "shift"}, "W"},
+    moveUp     = {{"cmd", "shift"}, "["},
+    moveDown   = {{"cmd", "shift"}, "]"},
+    moveTop    = {{"cmd", "shift"}, "up"},
+    moveBottom = {{"cmd", "shift"}, "down"},
 })
 spoon.iTerm2Axis:start()
 ```
@@ -29,10 +33,15 @@ spoon.iTerm2Axis:start()
 ## Default Hotkeys
 
 | Key | Action |
-|---|---|
+|---|---|---|
 | ⌘⇧A | Show / hide the Axis sidebar |
 | ⌘⇧N | Open a new iTerm2 window |
 | ⌘⇧R | Force-refresh the layout |
+| ⌘⇧W | Rename selected window |
+| ⌘⇧[ | Move selected window up the sidebar |
+| ⌘⇧] | Move selected window down the sidebar |
+| ⌘⇧↑ | Move selected window to top of sidebar |
+| ⌘⇧↓ | Move selected window to bottom of sidebar |
 
 You can override any of these via `bindHotkeys` (see above).
 
