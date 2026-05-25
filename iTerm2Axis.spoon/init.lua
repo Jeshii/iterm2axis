@@ -22,9 +22,8 @@ obj.config = {
     buttonHoverColor  = { red = 0.3,  green = 0.3,  blue = 0.35, alpha = 1 },
     activeButtonColor = { red = 0.25, green = 0.5,  blue = 0.8,  alpha = 1 },
     textColor         = { red = 0.9,  green = 0.9,  blue = 0.9,  alpha = 1 },
-    helpMenuHeight    = 200,
-    moveButtonHeight  = 30,
-    windowButtonHeight = 36,
+
+    windowButtonHeight = 44,
     padding           = 8,
 }
 
@@ -54,6 +53,48 @@ end
 local function color(c)
     return { red = c.red, green = c.green, blue = c.blue, alpha = c.alpha }
 end
+
+local function getSessionGitInfo()
+    local tmp = os.tmpname() .. ".sh"
+    local f = io.open(tmp, "w")
+    if not f then return {} end
+    f:write([[
+#!/bin/bash
+ITER_PID=$(pgrep -x iTerm2)
+[ -z "$ITER_PID" ] && exit 0
+ps -eo ppid,pid,comm | awk -v target="$ITER_PID" '
+{ parent[$2]=$1; comm[$2]=$3 }
+END {
+    for (pid in parent) {
+        p = pid; while (p in parent && p != target && p != 1) p = parent[p]
+        if (p == target && comm[pid] ~ /-(zsh|bash|fish)$/) print pid
+    }
+}' | while read pid; do
+    cwd=$(lsof -p "$pid" -d cwd -Fn 2>/dev/null | tail -1 | cut -c2-)
+    [ -n "$cwd" ] && echo "$cwd"
+done | sort -u | while read dir; do
+    branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+    [ -n "$branch" ] && echo "$dir|$branch"
+done
+]])
+    f:close()
+    local out, ok, exitType, exitCode = hs.execute("bash " .. tmp, true)
+    os.remove(tmp)
+    if not out or out == "" then return {} end
+
+    local map = {}
+    for line in out:gmatch("[^\n]+") do
+        local dir, branch = line:match("^(.-)|(.+)$")
+        if dir and branch then
+            local basename = dir:match("/([^/]+)$")
+            map[basename] = branch
+        end
+    end
+    return map
+end
+
+local _gitBranches = {}
+local _gitTimer
 
 -- ─────────────────────────────────────────────
 -- Layout
@@ -107,14 +148,12 @@ function obj:computeLayout()
         w = (f.x + f.w) - (anchor.x + cfg.sidebarWidth),
         h = anchor.h,
     }
-    local helpH = self.helpMenuOpen and cfg.helpMenuHeight or 0
 
     return {
         screen      = screen,
         screenFrame = f,
         sidebar     = sidebar,
         iterm       = iterm,
-        helpHeight  = helpH,
     }
 end
 
@@ -124,6 +163,9 @@ end
 
 function obj:buildSidebar()
     if self.sidebarCanvas then
+        if not self._pendingSidebarFrame then
+            self._pendingSidebarFrame = self.sidebarCanvas:frame()
+        end
         self.sidebarCanvas:delete()
         self.sidebarCanvas = nil
     end
@@ -153,36 +195,36 @@ function obj:buildSidebar()
         strokeWidth = 0,
     })
 
-    -- Move button (top)
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = 0, y = 0, w = sb.w, h = cfg.moveButtonHeight },
-        fillColor = { red = 0.15, green = 0.15, blue = 0.18, alpha = 1 },
-        strokeWidth = 0,
-    })
-    canvas:appendElements({
-        type = "text",
-        frame = { x = 0, y = 2, w = sb.w, h = cfg.moveButtonHeight },
-        text = "⠿  Move",
-        textColor = { red = 0.6, green = 0.6, blue = 0.65, alpha = 1 },
-        textSize = 12,
-        textAlignment = "center",
-    })
-
-    -- Separator
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = cfg.padding, y = cfg.moveButtonHeight, w = sb.w - cfg.padding * 2, h = 1 },
-        fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.4 },
-        strokeWidth = 0,
-    })
-
     -- Window buttons
     local itermWins = getITermWindows()
-    local y = cfg.moveButtonHeight + 6
-    self._buttonFrames = {}
+    local y = 6
+     self._buttonFrames = {}
 
-    for i, win in ipairs(itermWins) do
+     -- If we have a saved ordering, reorder itermWins to match
+     if self._orderedWindowIds and #self._orderedWindowIds > 0 then
+         local winMap = {}
+         for _, win in ipairs(itermWins) do
+             winMap[win:id()] = win
+         end
+         local ordered = {}
+         for _, wid in ipairs(self._orderedWindowIds) do
+             if winMap[wid] then
+                 table.insert(ordered, winMap[wid])
+                 winMap[wid] = nil
+             end
+         end
+         -- Append any new windows not in the saved order
+         for _, win in ipairs(itermWins) do
+             if winMap[win:id()] then
+                 table.insert(ordered, win)
+             end
+         end
+         itermWins = ordered
+     end
+
+     local gitBranches = _gitBranches
+
+     for i, win in ipairs(itermWins) do
         local winId   = win:id()
         local isActive = (winId == self.activeWindowId)
         local btnColor = isActive and cfg.activeButtonColor or cfg.buttonColor
@@ -195,17 +237,37 @@ function obj:buildSidebar()
             roundedRectRadii = { xRadius = 4, yRadius = 4 },
         })
 
-        local title = win:title() or ("Window " .. i)
-        if #title > 18 then title = title:sub(1, 16) .. "…" end
+         local title = self._customNames[winId] or win:title() or ("Window " .. i)
+         if #title > 18 then title = title:sub(1, 16) .. "…" end
 
         canvas:appendElements({
             type = "text",
-            frame = { x = cfg.padding + 6, y = y + 2, w = sb.w - cfg.padding * 2 - 12, h = cfg.windowButtonHeight },
+            frame = { x = cfg.padding + 6, y = y + 3, w = sb.w - cfg.padding * 2 - 12, h = 15 },
             text = title,
             textColor = color(cfg.textColor),
             textSize = 11,
             textAlignment = "left",
         })
+
+        local branch
+        local title = win:title()
+        for basename, br in pairs(gitBranches) do
+            if title:find(basename, 1, true) then
+                branch = br
+                break
+            end
+        end
+        if branch then
+            if #branch > 22 then branch = branch:sub(1, 20) .. "…" end
+            canvas:appendElements({
+                type = "text",
+                frame = { x = cfg.padding + 6, y = y + 20, w = sb.w - cfg.padding * 2 - 12, h = 13 },
+                text = "⎇ " .. branch,
+                textColor = { red = 0.5, green = 0.7, blue = 0.5, alpha = 0.9 },
+                textSize = 9,
+                textAlignment = "left",
+            })
+        end
 
         self._buttonFrames[i] = {
             x = cfg.padding, y = y,
@@ -215,107 +277,8 @@ function obj:buildSidebar()
         y = y + cfg.windowButtonHeight + 4
     end
 
-    -- Separator before help
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = 1 },
-        fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.4 },
-        strokeWidth = 0,
-    })
-    y = y + 6
-
-    -- Help toggle button
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = 28 },
-        fillColor = { red = 0.18, green = 0.18, blue = 0.22, alpha = 1 },
-        strokeWidth = 0,
-        roundedRectRadii = { xRadius = 4, yRadius = 4 },
-    })
-    canvas:appendElements({
-        type = "text",
-        frame = { x = 0, y = y, w = sb.w, h = 28 },
-        text = (self.helpMenuOpen and "▴  Help" or "▾  Help"),
-        textColor = { red = 0.7, green = 0.7, blue = 0.75, alpha = 1 },
-        textSize = 11,
-        textAlignment = "center",
-    })
-
-    self._helpButtonFrame = {
-        x = cfg.padding, y = y,
-        w = sb.w - cfg.padding * 2, h = 28,
-    }
-
     self.sidebarCanvas = canvas
     self._pendingSidebarFrame = nil
-    canvas:show()
-end
-
--- ─────────────────────────────────────────────
--- Help Menu
--- ─────────────────────────────────────────────
-
-function obj:buildHelpMenu()
-    if self.helpCanvas then
-        self.helpCanvas:delete()
-        self.helpCanvas = nil
-    end
-    if not self.helpMenuOpen then return end
-
-    local layout = self:computeLayout()
-    local sb  = layout.sidebar
-    local cfg = self.config
-    local helpY = sb.h - layout.helpHeight
-
-    local canvas = hs.canvas.new({
-        x = sb.x, y = sb.y + helpY, w = sb.w, h = layout.helpHeight
-    })
-    canvas:level(hs.canvas.windowLevels.floating)
-    canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
-
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = 0, y = 0, w = sb.w, h = layout.helpHeight },
-        fillColor = { red = 0.1, green = 0.1, blue = 0.12, alpha = 0.95 },
-        strokeWidth = 0,
-    })
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = 0, y = 0, w = sb.w, h = 1 },
-        fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
-        strokeWidth = 0,
-    })
-
-    local helpLines = {
-        "⌘ Shortcuts:",
-        "",
-        "⌘⇧A  Show/Hide Axis",
-        "⌘⇧N  New iTerm window",
-        "⌘⇧R  Refresh layout",
-        "",
-        "Custom Commands:",
-        "",
-        "Add your own in the",
-        "help section of init.lua",
-    }
-
-    local y = 10
-    for _, line in ipairs(helpLines) do
-        local isHeader = line:sub(-1) == ":"
-        canvas:appendElements({
-            type = "text",
-            frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = 16 },
-            text = line,
-            textColor = isHeader
-                and { red = 0.5, green = 0.7, blue = 1.0, alpha = 1 }
-                or  { red = 0.7, green = 0.7, blue = 0.75, alpha = 1 },
-            textSize = 10,
-            textAlignment = "left",
-        })
-        y = y + 14
-    end
-
-    self.helpCanvas = canvas
     canvas:show()
 end
 
@@ -344,68 +307,213 @@ function obj:bringWindowToFront(windowId)
     self:buildSidebar()
 end
 
-function obj:moveAllWindows(dx, dy)
-    for _, win in ipairs(getITermWindows()) do
-        local f = win:frame()
-        win:setFrame({ x = f.x + dx, y = f.y + dy, w = f.w, h = f.h })
-    end
-    if self.sidebarCanvas then
-        local sf = self.sidebarCanvas:frame()
-        self.sidebarCanvas:setTopLeft({ x = sf.x + dx, y = sf.y + dy })
-    end
-    if self.helpCanvas then
-        local hf = self.helpCanvas:frame()
-        self.helpCanvas:setTopLeft({ x = hf.x + dx, y = hf.y + dy })
-    end
-end
-
 -- ─────────────────────────────────────────────
 -- Mouse Handling
 -- ─────────────────────────────────────────────
 
-function obj:handleSidebarClick(x, y)
+function obj:handleSidebarClick(x, y, rightClick)
     if not self._buttonFrames then return end
-
-    local hb = self._helpButtonFrame
-    if hb and x >= hb.x and x <= hb.x + hb.w and y >= hb.y and y <= hb.y + hb.h then
-        self.helpMenuOpen = not self.helpMenuOpen
-        self:buildSidebar()
-        self:buildHelpMenu()
-        self:tileITermWindows()
-        return
-    end
 
     for _, btn in ipairs(self._buttonFrames) do
         if x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
-            self:bringWindowToFront(btn.windowId)
+            if rightClick then
+                self:showWindowMenu(btn.windowId)
+            end
             return
         end
     end
 end
 
--- ─────────────────────────────────────────────
--- Drag to Move
--- ─────────────────────────────────────────────
-
-function obj:startDrag()
-    local mouse = hs.mouse.absolutePosition()
-    self.dragStart = { x = mouse.x, y = mouse.y }
-    self.dragging = true
-end
-
-function obj:updateDrag()
-    if not self.dragging then return end
-    local mouse = hs.mouse.absolutePosition()
-    local dx = mouse.x - self.dragStart.x
-    local dy = mouse.y - self.dragStart.y
-    if dx ~= 0 or dy ~= 0 then
-        self:moveAllWindows(dx, dy)
-        self.dragStart = { x = mouse.x, y = mouse.y }
+function obj:renameWindow(windowId)
+    local win = hs.window.get(windowId)
+    local currentName = self._customNames[windowId] or (win and win:title()) or ""
+    local button, input = hs.dialog.textPrompt(
+        "Rename Window",
+        "Enter a custom name for this window:",
+        currentName,
+        "Rename",
+        "Cancel"
+    )
+    if button == "Rename" and input and input ~= "" then
+        self._customNames[windowId] = input
+        self:buildSidebar()
+    elseif button == "Rename" and (not input or input == "") then
+        self._customNames[windowId] = nil
+        self:buildSidebar()
     end
 end
 
-function obj:stopDrag()
-    self.dragging = false
+function obj:showWindowMenu(windowId)
+    local choices = {
+        { text = "Rename", subText = "Set a custom name for this window    ⌘⇧W" },
+        { text = "Move Up", subText = "Reorder this window higher    ⌘⇧[" },
+        { text = "Move Down", subText = "Reorder this window lower    ⌘⇧]" },
+        { text = "Move to Top", subText = "Move this window to the top    ⌘⇧↑" },
+        { text = "Move to Bottom", subText = "Move this window to the bottom    ⌘⇧↓" },
+        { text = "Refresh Layout", subText = "Re-tile all windows    ⌘⇧R" },
+        { text = "Show/Hide Axis", subText = "Toggle sidebar visibility    ⌘⇧A" },
+        { text = "iTerm Settings", subText = "Show setup guide for reusing session directory" },
+    }
+
+    local chooser = hs.chooser.new(function(choice)
+        if not choice then return end
+        if choice.text == "Rename" then
+            self:renameWindow(windowId)
+        elseif choice.text == "Move Up" then
+            self:moveWindowById(windowId, -1)
+        elseif choice.text == "Move Down" then
+            self:moveWindowById(windowId, 1)
+        elseif choice.text == "Move to Top" then
+            self:moveWindowToExtent(windowId, "top")
+        elseif choice.text == "Move to Bottom" then
+            self:moveWindowToExtent(windowId, "bottom")
+        elseif choice.text == "Refresh Layout" then
+            self:buildSidebar()
+            self:tileITermWindows()
+        elseif choice.text == "Show/Hide Axis" then
+            if self.sidebarCanvas then
+                if self.sidebarCanvas:isVisible() then
+                    self.sidebarCanvas:hide()
+                else
+                    self:buildSidebar()
+                    self:tileITermWindows()
+                end
+            else
+                self:buildSidebar()
+                self:tileITermWindows()
+            end
+        elseif choice.text == "iTerm Settings" then
+            self:showPreferencesTip()
+        end
+    end)
+    chooser:choices(choices)
+    chooser:searchSubText(false)
+    chooser:show()
+end
+
+function obj:showPreferencesTip()
+    if self._tipCanvas then
+        self._tipCanvas:delete()
+        self._tipCanvas = nil
+        if self._tipKey then self._tipKey:delete(); self._tipKey = nil end
+        return
+    end
+
+    local spoonDir = hs.spoons.scriptPath():match("^(.+/)")
+    local imgPath = spoonDir .. "preferences_tip.png"
+    local img = hs.image.imageFromPath(imgPath)
+    if not img then
+        hs.alert.show("Tip image not found", 2)
+        return
+    end
+
+    local screen = hs.screen.mainScreen():frame()
+    local imgSize = img:size()
+
+    local pad = 60
+    local cw = screen.w - pad * 2
+    local ch = screen.h - pad * 2
+
+    -- Scale image to fit the canvas while maintaining aspect ratio
+    local scale = math.min(cw / imgSize.w, ch / imgSize.h, 1)
+    local iw = math.floor(imgSize.w * scale)
+    local ih = math.floor(imgSize.h * scale)
+    local ix = math.floor((cw - iw) / 2)
+    local iy = math.floor((ch - ih) / 2)
+
+    -- Full-screen backdrop
+    local canvas = hs.canvas.new({ x = screen.x, y = screen.y, w = screen.w, h = screen.h })
+    canvas:level(hs.canvas.windowLevels.floating)
+    canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+
+    -- Semi-transparent background
+    canvas:appendElements({
+        type = "rectangle",
+        frame = { x = 0, y = 0, w = screen.w, h = screen.h },
+        fillColor = { red = 0, green = 0, blue = 0, alpha = 0.5 },
+        strokeWidth = 0,
+    })
+
+    -- The image centered
+    canvas:appendElements({
+        type = "image",
+        image = img,
+        frame = { x = pad + ix, y = pad + iy, w = iw, h = ih },
+    })
+
+    -- Click anywhere to dismiss
+    canvas:canvasMouseEvents(true)
+    canvas:mouseCallback(function(_, _, event)
+        if event == "leftMouseDown" then
+            canvas:delete()
+            if self._tipCanvas == canvas then self._tipCanvas = nil end
+            if self._tipKey then self._tipKey:delete(); self._tipKey = nil end
+        end
+    end)
+
+    -- Also dismiss on Escape
+    self._tipKey = hs.hotkey.bind({}, "escape", function()
+        canvas:delete()
+        if self._tipCanvas == canvas then self._tipCanvas = nil end
+        if self._tipKey then self._tipKey:delete(); self._tipKey = nil end
+    end)
+
+    canvas:show()
+    self._tipCanvas = canvas
+end
+
+function obj:moveWindowById(windowId, direction)
+    if not self._orderedWindowIds then self._orderedWindowIds = {} end
+    if #self._orderedWindowIds == 0 then
+        local wins = getITermWindows()
+        for _, win in ipairs(wins) do
+            table.insert(self._orderedWindowIds, win:id())
+        end
+    end
+    if #self._orderedWindowIds < 2 then return end
+
+    local currentIdx
+    for i, id in ipairs(self._orderedWindowIds) do
+        if id == windowId then
+            currentIdx = i
+            break
+        end
+    end
+    if not currentIdx then return end
+
+    local newIdx = currentIdx + direction
+    if newIdx < 1 or newIdx > #self._orderedWindowIds then return end
+
+    self._orderedWindowIds[currentIdx], self._orderedWindowIds[newIdx] =
+        self._orderedWindowIds[newIdx], self._orderedWindowIds[currentIdx]
+    self:buildSidebar()
+end
+
+function obj:moveWindowToExtent(windowId, extent)
+    if not self._orderedWindowIds then self._orderedWindowIds = {} end
+    if #self._orderedWindowIds == 0 then
+        local wins = getITermWindows()
+        for _, win in ipairs(wins) do
+            table.insert(self._orderedWindowIds, win:id())
+        end
+    end
+    if #self._orderedWindowIds < 2 then return end
+
+    local currentIdx
+    for i, id in ipairs(self._orderedWindowIds) do
+        if id == windowId then
+            currentIdx = i
+            break
+        end
+    end
+    if not currentIdx then return end
+
+    local targetIdx = extent == "top" and 1 or #self._orderedWindowIds
+    if currentIdx == targetIdx then return end
+
+    table.remove(self._orderedWindowIds, currentIdx)
+    table.insert(self._orderedWindowIds, targetIdx, windowId)
+    self:buildSidebar()
 end
 
 -- ─────────────────────────────────────────────
@@ -438,8 +546,6 @@ function obj:handleWindowMoveOrResize()
         self._resizeDebounceTimer:stop()
     end
     self._resizeDebounceTimer = hs.timer.doAfter(0.3, function()
-        if self.dragging then return end
-
         local wins = getITermWindows()
         if #wins == 0 then return end
 
@@ -451,7 +557,6 @@ function obj:handleWindowMoveOrResize()
             self._currentScreen       = winScreen
             self._pendingSidebarFrame = nil
             self:buildSidebar()
-            self:buildHelpMenu()
             self:tileITermWindows()
             return
         end
@@ -476,24 +581,29 @@ function obj:handleWindowMoveOrResize()
             local f        = driftedWin:frame()
             local sf       = winScreen:frame()
             local sidebarW = cfg.sidebarWidth
-            local sidebarX = f.x - sidebarW
 
-            -- Clamp: don't go off left edge of screen
-            if sidebarX < sf.x then sidebarX = sf.x end
+            -- Don't snap if the window is too small to fit sidebar + content
+            if f.w <= sidebarW then return end
+
+            -- Sidebar goes at the window's recorded left edge (inside its footprint).
+            -- Window shifts right by sidebarW, keeping its right edge anchored.
+            local anchorX  = f.x
+            local sidebarX = math.max(anchorX, sf.x)
+            local contentX = sidebarX + sidebarW
+            local maxW     = (sf.x + sf.w) - contentX
+            if maxW <= 0 then return end
+            local contentW = math.min(f.w - sidebarW, maxW)
 
             -- Set pending frame so buildSidebar/computeLayout use new position
             self._pendingSidebarFrame = { x = sidebarX, y = f.y, w = sidebarW, h = f.h }
             self._currentScreen = winScreen
 
-            -- Tile all windows into the space right of the new sidebar position
-            local contentX = sidebarX + sidebarW
-            local contentW = (sf.x + sf.w) - contentX
+            -- Tile all windows into the adjusted content area
             local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
             for _, w in ipairs(wins) do w:setFrame(newFrame) end
 
             -- Rebuild canvases at the new position
             self:buildSidebar()
-            self:buildHelpMenu()
         end
     end)
 end
@@ -516,20 +626,22 @@ function obj:bindHotkeys(mapping)
     local toggleMods, toggleKey = table.unpack(map.toggle or {{"cmd","shift"}, "A"})
     local newWinMods, newWinKey = table.unpack(map.newWindow or {{"cmd","shift"}, "N"})
     local refreshMods, refreshKey = table.unpack(map.refresh or {{"cmd","shift"}, "R"})
+    local renameMods, renameKey = table.unpack(map.renameWindow or {{"cmd","shift"}, "W"})
+    local moveUpMods, moveUpKey = table.unpack(map.moveUp or {{"cmd","shift"}, "["})
+    local moveDownMods, moveDownKey = table.unpack(map.moveDown or {{"cmd","shift"}, "]"})
+    local moveTopMods, moveTopKey = table.unpack(map.moveToTop or {{"cmd","shift"}, "up"})
+    local moveBottomMods, moveBottomKey = table.unpack(map.moveToBottom or {{"cmd","shift"}, "down"})
 
     hs.hotkey.bind(toggleMods, toggleKey, function()
         if self.sidebarCanvas then
             if self.sidebarCanvas:isVisible() then
                 self.sidebarCanvas:hide()
-                if self.helpCanvas then self.helpCanvas:hide() end
             else
                 self:buildSidebar()
-                self:buildHelpMenu()
                 self:tileITermWindows()
             end
         else
             self:buildSidebar()
-            self:buildHelpMenu()
             self:tileITermWindows()
         end
     end)
@@ -554,8 +666,27 @@ function obj:bindHotkeys(mapping)
 
     hs.hotkey.bind(refreshMods, refreshKey, function()
         self:buildSidebar()
-        self:buildHelpMenu()
         self:tileITermWindows()
+    end)
+
+    hs.hotkey.bind(renameMods, renameKey, function()
+        if self.activeWindowId then self:renameWindow(self.activeWindowId) end
+    end)
+
+    hs.hotkey.bind(moveUpMods, moveUpKey, function()
+        if self.activeWindowId then self:moveWindowById(self.activeWindowId, -1) end
+    end)
+
+    hs.hotkey.bind(moveDownMods, moveDownKey, function()
+        if self.activeWindowId then self:moveWindowById(self.activeWindowId, 1) end
+    end)
+
+    hs.hotkey.bind(moveTopMods, moveTopKey, function()
+        if self.activeWindowId then self:moveWindowToExtent(self.activeWindowId, "top") end
+    end)
+
+    hs.hotkey.bind(moveBottomMods, moveBottomKey, function()
+        if self.activeWindowId then self:moveWindowToExtent(self.activeWindowId, "bottom") end
     end)
 end
 
@@ -572,6 +703,7 @@ function obj:start()
     self._mouseTap = hs.eventtap.new(
         {
             hs.eventtap.event.types.leftMouseDown,
+            hs.eventtap.event.types.rightMouseDown,
             hs.eventtap.event.types.leftMouseDragged,
             hs.eventtap.event.types.leftMouseUp,
         },
@@ -582,25 +714,30 @@ function obj:start()
             if not self.sidebarCanvas then return false end
             local sf = self.sidebarCanvas:frame()
 
-            local inMoveArea = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
-                and mouse.y >= sf.y and mouse.y <= sf.y + self.config.moveButtonHeight
             local inSidebar = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
                 and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
 
             if eventType == hs.eventtap.event.types.leftMouseDown then
-                if inMoveArea then
-                    self:startDrag()
-                    return true
-                elseif inSidebar then
-                    self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y)
+                if inSidebar then
+                    local lx, ly = mouse.x - sf.x, mouse.y - sf.y
+                    if self._buttonFrames then
+                        for _, btn in ipairs(self._buttonFrames) do
+                            if lx >= btn.x and lx <= btn.x + btn.w
+                            and ly >= btn.y and ly <= btn.y + btn.h then
+                                self:bringWindowToFront(btn.windowId)
+                                return true
+                            end
+                        end
+                    end
                     return true
                 end
-            elseif eventType == hs.eventtap.event.types.leftMouseDragged then
-                if self.dragging then self:updateDrag(); return true end
-            elseif eventType == hs.eventtap.event.types.leftMouseUp then
-                if self.dragging then self:stopDrag(); return true end
+            elseif eventType == hs.eventtap.event.types.rightMouseDown then
+                if inSidebar then
+                    self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, true)
+                    return true
+                end
             end
-            return false
+             return false
         end
     )
     self._mouseTap:start()
@@ -642,7 +779,6 @@ function obj:start()
     self._screenWatcher = hs.screen.watcher.new(function()
         hs.timer.doAfter(0.3, function()
             self:buildSidebar()
-            self:buildHelpMenu()
             self:tileITermWindows()
         end)
     end)
@@ -650,8 +786,17 @@ function obj:start()
 
     -- Build initial UI
     self:buildSidebar()
-    self:buildHelpMenu()
     self:tileITermWindows()
+
+    -- Refresh git branches in background every 5s
+    _gitBranches = getSessionGitInfo()
+    _gitTimer = hs.timer.new(5, function()
+        _gitBranches = getSessionGitInfo()
+        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self:buildSidebar()
+        end
+    end)
+    _gitTimer:start()
 
     hs.alert.show("iTerm2 Axis loaded ✓", 1.5)
     return self
@@ -668,9 +813,11 @@ function obj:stop()
         w:stop()
     end
     self._windowWatchers = {}
-    if self.sidebarCanvas  then self.sidebarCanvas:delete();  self.sidebarCanvas  = nil end
-    if self.helpCanvas     then self.helpCanvas:delete();     self.helpCanvas     = nil end
-    return self
+     if self.sidebarCanvas   then self.sidebarCanvas:delete();   self.sidebarCanvas   = nil end
+     if self._tipCanvas      then self._tipCanvas:delete();      self._tipCanvas      = nil end
+     if self._tipKey         then self._tipKey:delete();         self._tipKey         = nil end
+     if _gitTimer            then _gitTimer:stop();              _gitTimer            = nil end
+     return self
 end
 
 --- iTerm2Axis:init()
@@ -681,23 +828,22 @@ end
 function obj:init()
     self.windows        = {}
     self.sidebarCanvas  = nil
-    self.helpCanvas     = nil
-    self.isHelpVisible  = false
     self.activeWindowId = nil
-    self.dragging       = false
-    self.dragStart      = { x = 0, y = 0 }
-    self.sidebarStart   = { x = 0, y = 0, w = 0, h = 0 }
-    self.helpMenuOpen   = false
     self._currentScreen = nil
     self._buttonFrames  = {}
-    self._helpButtonFrame = nil
     self._resizeDebounceTimer = nil
     self._pendingSidebarFrame = nil
     self._mouseTap       = nil
     self._winWatcher     = nil
     self._screenWatcher  = nil
-    self._windowWatchers = {}
-    return self
+    self._tipCanvas      = nil
+    self._tipKey         = nil
+    _gitBranches         = {}
+    _gitTimer            = nil
+     self._windowWatchers    = {}
+     self._customNames       = {}
+     self._orderedWindowIds  = {}
+     return self
 end
 
 return obj
