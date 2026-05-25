@@ -133,6 +133,16 @@ local function getGitBranchForWindow(win)
         )
     end
 
+    -- Strategy 3: match by opencode session title in window title
+    if (not branch or branch:gsub("%s+", "") == "") and obj._opencodeData then
+        for dir, data in pairs(obj._opencodeData) do
+            if data.title and title:find(data.title, 1, true) then
+                branch = hs.execute("git -C '" .. dir .. "' rev-parse --abbrev-ref HEAD 2>/dev/null")
+                if branch and branch:gsub("%s+", "") ~= "" then break end
+            end
+        end
+    end
+
     branch = branch and branch:gsub("%s+$", "")
     local result = (branch and branch ~= "") and branch or false
     _gitBranchCache[winId] = result
@@ -163,7 +173,7 @@ function obj:fetchOpenCodeData()
     local loaded = false
 
     -- Try HTTP API first (opencode serve)
-    local okHttp, httpResult = pcall(hs.execute, "curl -s -m 2 http://127.0.0.1:" .. self.config.opencode.port .. "/session 2>/dev/null")
+    local okHttp, httpResult = pcall(hs.execute, "/usr/bin/curl -s -m 2 http://127.0.0.1:" .. self.config.opencode.port .. "/session 2>/dev/null")
     if okHttp and httpResult and httpResult ~= "" then
         local ok, sessions = pcall(hs.json.decode, httpResult)
         if ok and type(sessions) == "table" then
@@ -196,7 +206,7 @@ function obj:fetchOpenCodeData()
     if not loaded then
         local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
         local sql = "SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
-        local cmd = "sqlite3 -json '" .. dbPath .. "' \"" .. sql .. "\" 2>/dev/null"
+        local cmd = "/usr/bin/sqlite3 -json '" .. dbPath .. "' \"" .. sql .. "\" 2>/dev/null"
         local okDB, dbResult = pcall(hs.execute, cmd)
         if okDB and dbResult and dbResult ~= "" then
             local ok, sessions = pcall(hs.json.decode, dbResult)
@@ -223,11 +233,25 @@ function obj:fetchOpenCodeData()
         end
     end
 
+    local sessionCount = 0
+    for _ in pairs(newData) do sessionCount = sessionCount + 1 end
+    local matchCount = 0
+    for _, win in ipairs(getITermWindows()) do
+        local parts = parseTitleComponents(win:title() or "")
+        if parts.fullPath and newData[parts.fullPath] then
+            matchCount = matchCount + 1
+        end
+    end
+    hs.printf("opencode: %d sessions fetched, %d windows matched", sessionCount, matchCount)
+
     self._opencodeData = newData
 end
 
 function obj:startOpenCodePolling()
     self:fetchOpenCodeData()
+    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+        self:buildSidebar()
+    end
     if self._opencodePollTimer then self._opencodePollTimer:stop() end
     self._opencodePollTimer = hs.timer.new(self.config.opencode.pollInterval, function()
         self:fetchOpenCodeData()
@@ -425,7 +449,17 @@ function obj:buildSidebar()
         end
 
         -- ── Line 4: opencode session info ──
-        local ocData = parts.fullPath and self._opencodeData[parts.fullPath]
+        local ocData
+        if parts.fullPath and self._opencodeData[parts.fullPath] then
+            ocData = self._opencodeData[parts.fullPath]
+        else
+            for _, data in pairs(self._opencodeData or {}) do
+                if data.title and rawTitle:find(data.title, 1, true) then
+                    ocData = data
+                    break
+                end
+            end
+        end
         if ocData then
             local modelStr = shortModelName(ocData.modelID) or ""
             local agentStr = ocData.agent or ""
@@ -542,8 +576,18 @@ function obj:showWindowMenu(windowId)
     local win = hs.window.get(windowId)
     local title = win and win:title() or ""
     local parts = parseTitleComponents(title)
+    local oc
     if parts.fullPath and self._opencodeData[parts.fullPath] then
-        local oc = self._opencodeData[parts.fullPath]
+        oc = self._opencodeData[parts.fullPath]
+    else
+        for _, d in pairs(self._opencodeData or {}) do
+            if d.title and title:find(d.title, 1, true) then
+                oc = d
+                break
+            end
+        end
+    end
+    if oc then
         local modelStr = shortModelName(oc.modelID) or "?"
         local titleStr = oc.title or "Untitled"
         if #titleStr > 40 then titleStr = titleStr:sub(1, 38) .. "…" end
