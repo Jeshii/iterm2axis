@@ -53,7 +53,3 @@ Customise `spoon.iTerm2Axis.config` before calling `:start()`:
 spoon.iTerm2Axis.config.sidebarWidth = 200
 spoon.iTerm2Axis.config.activeButtonColor = {red=0.8, green=0.3, blue=0.1, alpha=1}
 ```
-
-## License
-
-MIT
