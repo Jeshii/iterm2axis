@@ -23,8 +23,14 @@ obj.config = {
     activeButtonColor = { red = 0.25, green = 0.5,  blue = 0.8,  alpha = 1 },
     textColor         = { red = 0.9,  green = 0.9,  blue = 0.9,  alpha = 1 },
 
-    windowButtonHeight = 62,  -- tall enough for 3 lines
+    windowButtonHeight = 74,  -- tall enough for 4 lines (opencode)
     padding           = 8,
+
+    opencode = {
+        enabled      = true,
+        port         = 4096,
+        pollInterval = 5,
+    },
 }
 
 -- ─────────────────────────────────────────────
@@ -131,6 +137,105 @@ local function getGitBranchForWindow(win)
     local result = (branch and branch ~= "") and branch or false
     _gitBranchCache[winId] = result
     return result or nil
+end
+
+-- ─────────────────────────────────────────────
+-- Opencode helpers
+-- ─────────────────────────────────────────────
+
+local function shortModelName(id)
+    if not id or id == "" then return nil end
+    local name = id:match("[^/]+$") or id
+    name = name:gsub(":free$", ""):gsub(":default$", ""):gsub(":high$", ""):gsub(":max$", "")
+    name = name:gsub("^deepseek%-", "ds-")
+    if #name > 14 then name = name:sub(1, 12) .. "…" end
+    return name
+end
+
+local function fmtTokens(n)
+    if n >= 1000000 then return string.format("%.1fM", n / 1e6) end
+    if n >= 1000 then return string.format("%.1fk", n / 1e3) end
+    return tostring(n)
+end
+
+function obj:fetchOpenCodeData()
+    local newData = {}
+    local loaded = false
+
+    -- Try HTTP API first (opencode serve)
+    local okHttp, httpResult = pcall(hs.execute, "curl -s -m 2 http://127.0.0.1:" .. self.config.opencode.port .. "/session 2>/dev/null")
+    if okHttp and httpResult and httpResult ~= "" then
+        local ok, sessions = pcall(hs.json.decode, httpResult)
+        if ok and type(sessions) == "table" then
+            for _, s in ipairs(sessions) do
+                if s.directory then
+                    local existing = newData[s.directory]
+                    if not existing or (s.time_updated or 0) > existing.updated then
+                        local m = {}
+                        if s.model then
+                            local ok2, parsed = pcall(hs.json.decode, s.model)
+                            if ok2 and type(parsed) == "table" then m = parsed end
+                        end
+                        newData[s.directory] = {
+                            title    = s.title,
+                            modelID  = m.id,
+                            provider = m.providerID,
+                            agent    = s.agent,
+                            tokensIn = s.tokens_input or 0,
+                            tokensOut = s.tokens_output or 0,
+                            updated  = s.time_updated or 0,
+                        }
+                    end
+                end
+            end
+            loaded = true
+        end
+    end
+
+    -- Fall back to SQLite database
+    if not loaded then
+        local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
+        local sql = "SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
+        local cmd = "sqlite3 -json '" .. dbPath .. "' \"" .. sql .. "\" 2>/dev/null"
+        local okDB, dbResult = pcall(hs.execute, cmd)
+        if okDB and dbResult and dbResult ~= "" then
+            local ok, sessions = pcall(hs.json.decode, dbResult)
+            if ok and type(sessions) == "table" then
+                for _, s in ipairs(sessions) do
+                    if s.directory and not newData[s.directory] then
+                        local m = {}
+                        if s.model then
+                            local ok2, parsed = pcall(hs.json.decode, s.model)
+                            if ok2 and type(parsed) == "table" then m = parsed end
+                        end
+                        newData[s.directory] = {
+                            title    = s.title,
+                            modelID  = m.id,
+                            provider = m.providerID,
+                            agent    = s.agent,
+                            tokensIn = s.tokens_input or 0,
+                            tokensOut = s.tokens_output or 0,
+                            updated  = s.time_updated or 0,
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    self._opencodeData = newData
+end
+
+function obj:startOpenCodePolling()
+    self:fetchOpenCodeData()
+    if self._opencodePollTimer then self._opencodePollTimer:stop() end
+    self._opencodePollTimer = hs.timer.new(self.config.opencode.pollInterval, function()
+        self:fetchOpenCodeData()
+        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self:buildSidebar()
+        end
+    end)
+    self._opencodePollTimer:start()
 end
 
 -- ─────────────────────────────────────────────
@@ -319,6 +424,34 @@ function obj:buildSidebar()
             })
         end
 
+        -- ── Line 4: opencode session info ──
+        local ocData = parts.fullPath and self._opencodeData[parts.fullPath]
+        if ocData then
+            local modelStr = shortModelName(ocData.modelID) or ""
+            local agentStr = ocData.agent or ""
+            local tokStr = ""
+            if ocData.tokensIn and ocData.tokensIn > 0 then
+                tokStr = fmtTokens(ocData.tokensIn) .. " in"
+                if ocData.tokensOut and ocData.tokensOut > 0 then
+                    tokStr = tokStr .. " · " .. fmtTokens(ocData.tokensOut) .. " out"
+                end
+            end
+            local segments = {}
+            if modelStr ~= "" then table.insert(segments, modelStr) end
+            if agentStr ~= "" then table.insert(segments, agentStr) end
+            if tokStr ~= "" then table.insert(segments, tokStr) end
+            local ocText = table.concat(segments, "  ")
+            if #ocText > 26 then ocText = ocText:sub(1, 24) .. "…" end
+            canvas:appendElements({
+                type          = "text",
+                frame         = { x = textX, y = y + 53, w = textW, h = 12 },
+                text          = ocText,
+                textColor     = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
+                textSize      = 9,
+                textAlignment = "left",
+            })
+        end
+
         self._buttonFrames[i] = {
             x = cfg.padding, y = y,
             w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
@@ -404,6 +537,21 @@ function obj:showWindowMenu(windowId)
         { text = "Show/Hide Axis", subText = "Toggle sidebar visibility    ⌘⇧A" },
         { text = "iTerm Settings", subText = "Show setup guide for reusing session directory" },
     }
+
+    -- Show opencode session info for this window if available
+    local win = hs.window.get(windowId)
+    local title = win and win:title() or ""
+    local parts = parseTitleComponents(title)
+    if parts.fullPath and self._opencodeData[parts.fullPath] then
+        local oc = self._opencodeData[parts.fullPath]
+        local modelStr = shortModelName(oc.modelID) or "?"
+        local titleStr = oc.title or "Untitled"
+        if #titleStr > 40 then titleStr = titleStr:sub(1, 38) .. "…" end
+        table.insert(choices, 1, {
+            text = "OpenCode: " .. modelStr .. " (" .. (oc.agent or "?") .. ")",
+            subText = titleStr .. "  ·  " .. fmtTokens(oc.tokensIn or 0) .. " in, " .. fmtTokens(oc.tokensOut or 0) .. " out",
+        })
+    end
 
     local chooser = hs.chooser.new(function(choice)
         if not choice then return end
@@ -808,6 +956,10 @@ function obj:start()
     self:buildSidebar()
     self:tileITermWindows()
 
+    if self.config.opencode.enabled then
+        self:startOpenCodePolling()
+    end
+
     hs.alert.show("iTerm2 Axis loaded ✓", 1.5)
     return self
 end
@@ -823,6 +975,7 @@ function obj:stop()
     if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
     _gitBranchCache = {}
     _gitTitleCache  = {}
+    if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     return self
 end
 
@@ -842,6 +995,8 @@ function obj:init()
     self._windowWatchers   = {}
     self._customNames      = {}
     self._orderedWindowIds = {}
+    self._opencodeData     = {}
+    self._opencodePollTimer = nil
     _gitBranchCache        = {}
     _gitTitleCache         = {}
     return self
