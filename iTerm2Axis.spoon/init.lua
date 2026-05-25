@@ -23,7 +23,7 @@ obj.config = {
     activeButtonColor = { red = 0.25, green = 0.5,  blue = 0.8,  alpha = 1 },
     textColor         = { red = 0.9,  green = 0.9,  blue = 0.9,  alpha = 1 },
 
-    windowButtonHeight = 44,
+    windowButtonHeight = 62,  -- tall enough for 3 lines
     padding           = 8,
 }
 
@@ -54,6 +54,45 @@ local function color(c)
     return { red = c.red, green = c.green, blue = c.blue, alpha = c.alpha }
 end
 
+-- Parse iTerm2 window title into its components.
+-- Handles formats:
+--   "user@host: /full/path"   (shell integration with host + PWD)
+--   "user@host: ~/path"       (tilde path)
+--   "/full/path"              (PWD only)
+--   "~/path"                  (tilde PWD only)
+--   "dirname"                 (plain name, no path)
+-- Returns: { host = string|nil, fullPath = string|nil, basename = string|nil }
+local function parseTitleComponents(title)
+    if not title or title == "" then return {} end
+    local home = os.getenv("HOME") or ""
+
+    local host, pathPart
+
+    -- Try "user@host: /path" or "user@host: ~/path"
+    local h, p = title:match("^[^@]+@([^:]+):%s*(~?/.+)$")
+    if h and p then
+        host = h
+        pathPart = p
+    else
+        -- Try bare path (no host prefix)
+        pathPart = title:match("^(~?/[^%s].*)$") or title:match("%s(~?/[^%s]+)%s*$")
+    end
+
+    local fullPath = pathPart and pathPart:gsub("^~", home):gsub("%s+$", "")
+    local basename = fullPath and fullPath:match("([^/]+)%s*$")
+
+    -- If still no basename, fall back to the last non-separator token in the raw title
+    if not basename or basename == "" then
+        basename = title:match("([^%s/:]+)%s*$")
+    end
+
+    return {
+        host     = host,
+        fullPath = fullPath,
+        basename = basename,
+    }
+end
+
 -- Per-window git branch cache, keyed by windowId.
 -- Only re-runs `git rev-parse` when a window's title actually changes.
 local _gitBranchCache = {}  -- [windowId] = branch string or false
@@ -74,29 +113,18 @@ local function getGitBranchForWindow(win)
 
     local home = os.getenv("HOME") or ""
     local branch
+    local parts = parseTitleComponents(title)
 
-    -- Strategy 1: extract a full path from the title.
-    -- Handles formats produced by iTerm2 shell integration + PWD title component:
-    --   "user@host: /Users/you/projects/myrepo"  →  /Users/you/projects/myrepo
-    --   "user@host: ~/projects/myrepo"           →  ~/projects/myrepo  (expanded)
-    --   "/Users/you/projects/myrepo"             →  direct absolute path
-    --   "~/projects/myrepo"                      →  expanded tilde path
-    local fullPath = title:match("%s(~?/[^%s]+)%s*$") or title:match("^(~?/[^%s]+)%s*$")
-    if fullPath then
-        -- Expand leading ~ to $HOME
-        fullPath = fullPath:gsub("^~", home)
-        branch = hs.execute("git -C '" .. fullPath .. "' rev-parse --abbrev-ref HEAD 2>/dev/null")
+    -- Strategy 1: use the full path extracted from the title
+    if parts.fullPath then
+        branch = hs.execute("git -C '" .. parts.fullPath .. "' rev-parse --abbrev-ref HEAD 2>/dev/null")
     end
 
-    -- Strategy 2: fall back to treating the last path component as a dirname under $HOME.
-    -- Handles plain titles like "myrepo" or "-zsh" (the latter will just return nothing).
-    if not branch or branch:gsub("%s+", "") == "" then
-        local basename = title:match("([^%s/:]+)%s*$")
-        if basename and basename ~= "" then
-            branch = hs.execute(
-                "git -C '" .. home .. "/" .. basename .. "' rev-parse --abbrev-ref HEAD 2>/dev/null"
-            )
-        end
+    -- Strategy 2: fall back to treating basename as a dir under $HOME
+    if (not branch or branch:gsub("%s+", "") == "") and parts.basename then
+        branch = hs.execute(
+            "git -C '" .. home .. "/" .. parts.basename .. "' rev-parse --abbrev-ref HEAD 2>/dev/null"
+        )
     end
 
     branch = branch and branch:gsub("%s+$", "")
@@ -207,35 +235,40 @@ function obj:buildSidebar()
     -- Window buttons
     local itermWins = getITermWindows()
     local y = 6
-     self._buttonFrames = {}
+    self._buttonFrames = {}
 
-     -- If we have a saved ordering, reorder itermWins to match
-     if self._orderedWindowIds and #self._orderedWindowIds > 0 then
-         local winMap = {}
-         for _, win in ipairs(itermWins) do
-             winMap[win:id()] = win
-         end
-         local ordered = {}
-         for _, wid in ipairs(self._orderedWindowIds) do
-             if winMap[wid] then
-                 table.insert(ordered, winMap[wid])
-                 winMap[wid] = nil
-             end
-         end
-         -- Append any new windows not in the saved order
-         for _, win in ipairs(itermWins) do
-             if winMap[win:id()] then
-                 table.insert(ordered, win)
-             end
-         end
-         itermWins = ordered
-     end
+    -- If we have a saved ordering, reorder itermWins to match
+    if self._orderedWindowIds and #self._orderedWindowIds > 0 then
+        local winMap = {}
+        for _, win in ipairs(itermWins) do
+            winMap[win:id()] = win
+        end
+        local ordered = {}
+        for _, wid in ipairs(self._orderedWindowIds) do
+            if winMap[wid] then
+                table.insert(ordered, winMap[wid])
+                winMap[wid] = nil
+            end
+        end
+        for _, win in ipairs(itermWins) do
+            if winMap[win:id()] then
+                table.insert(ordered, win)
+            end
+        end
+        itermWins = ordered
+    end
 
-     for i, win in ipairs(itermWins) do
-        local winId   = win:id()
+    local textW = sb.w - cfg.padding * 2 - 12
+    local textX = cfg.padding + 6
+
+    for i, win in ipairs(itermWins) do
+        local winId    = win:id()
         local isActive = (winId == self.activeWindowId)
         local btnColor = isActive and cfg.activeButtonColor or cfg.buttonColor
+        local rawTitle = win:title() or ""
+        local parts    = parseTitleComponents(rawTitle)
 
+        -- Button background
         canvas:appendElements({
             type = "rectangle",
             frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
@@ -244,28 +277,44 @@ function obj:buildSidebar()
             roundedRectRadii = { xRadius = 4, yRadius = 4 },
         })
 
-         local title = self._customNames[winId] or win:title() or ("Window " .. i)
-         if #title > 18 then title = title:sub(1, 16) .. "…" end
-
+        -- ── Line 1: custom rename → hostname → "Window N" fallback ──
+        local label = self._customNames[winId]
+            or parts.host
+            or ("Window " .. i)
+        if #label > 18 then label = label:sub(1, 16) .. "…" end
         canvas:appendElements({
-            type = "text",
-            frame = { x = cfg.padding + 6, y = y + 3, w = sb.w - cfg.padding * 2 - 12, h = 15 },
-            text = title,
-            textColor = color(cfg.textColor),
-            textSize = 11,
+            type          = "text",
+            frame         = { x = textX, y = y + 5, w = textW, h = 15 },
+            text          = label,
+            textColor     = color(cfg.textColor),
+            textSize      = 11,
             textAlignment = "left",
         })
 
-        -- Lightweight: reads from per-window cache populated by windowTitleChanged
+        -- ── Line 2: PWD basename ──
+        if parts.basename then
+            local base = parts.basename
+            if #base > 20 then base = base:sub(1, 18) .. "…" end
+            canvas:appendElements({
+                type          = "text",
+                frame         = { x = textX, y = y + 22, w = textW, h = 13 },
+                text          = base,
+                textColor     = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
+                textSize      = 10,
+                textAlignment = "left",
+            })
+        end
+
+        -- ── Line 3: git branch ──
         local branch = getGitBranchForWindow(win)
         if branch then
-            if #branch > 22 then branch = branch:sub(1, 20) .. "…" end
+            if #branch > 20 then branch = branch:sub(1, 18) .. "…" end
             canvas:appendElements({
-                type = "text",
-                frame = { x = cfg.padding + 6, y = y + 20, w = sb.w - cfg.padding * 2 - 12, h = 13 },
-                text = "⎇ " .. branch,
-                textColor = { red = 0.5, green = 0.7, blue = 0.5, alpha = 0.9 },
-                textSize = 9,
+                type          = "text",
+                frame         = { x = textX, y = y + 38, w = textW, h = 13 },
+                text          = "⎇ " .. branch,
+                textColor     = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
+                textSize      = 10,
                 textAlignment = "left",
             })
         end
@@ -415,34 +464,28 @@ function obj:showPreferencesTip()
     local cw = screen.w - pad * 2
     local ch = screen.h - pad * 2
 
-    -- Scale image to fit the canvas while maintaining aspect ratio
     local scale = math.min(cw / imgSize.w, ch / imgSize.h, 1)
     local iw = math.floor(imgSize.w * scale)
     local ih = math.floor(imgSize.h * scale)
     local ix = math.floor((cw - iw) / 2)
     local iy = math.floor((ch - ih) / 2)
 
-    -- Full-screen backdrop
     local canvas = hs.canvas.new({ x = screen.x, y = screen.y, w = screen.w, h = screen.h })
     canvas:level(hs.canvas.windowLevels.floating)
     canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
 
-    -- Semi-transparent background
     canvas:appendElements({
         type = "rectangle",
         frame = { x = 0, y = 0, w = screen.w, h = screen.h },
         fillColor = { red = 0, green = 0, blue = 0, alpha = 0.5 },
         strokeWidth = 0,
     })
-
-    -- The image centered
     canvas:appendElements({
         type = "image",
         image = img,
         frame = { x = pad + ix, y = pad + iy, w = iw, h = ih },
     })
 
-    -- Click anywhere to dismiss
     canvas:canvasMouseEvents(true)
     canvas:mouseCallback(function(_, _, event)
         if event == "leftMouseDown" then
@@ -452,7 +495,6 @@ function obj:showPreferencesTip()
         end
     end)
 
-    -- Also dismiss on Escape
     self._tipKey = hs.hotkey.bind({}, "escape", function()
         canvas:delete()
         if self._tipCanvas == canvas then self._tipCanvas = nil end
@@ -475,10 +517,7 @@ function obj:moveWindowById(windowId, direction)
 
     local currentIdx
     for i, id in ipairs(self._orderedWindowIds) do
-        if id == windowId then
-            currentIdx = i
-            break
-        end
+        if id == windowId then currentIdx = i; break end
     end
     if not currentIdx then return end
 
@@ -502,10 +541,7 @@ function obj:moveWindowToExtent(windowId, extent)
 
     local currentIdx
     for i, id in ipairs(self._orderedWindowIds) do
-        if id == windowId then
-            currentIdx = i
-            break
-        end
+        if id == windowId then currentIdx = i; break end
     end
     if not currentIdx then return end
 
@@ -583,11 +619,8 @@ function obj:handleWindowMoveOrResize()
             local sf       = winScreen:frame()
             local sidebarW = cfg.sidebarWidth
 
-            -- Don't snap if the window is too small to fit sidebar + content
             if f.w <= sidebarW then return end
 
-            -- Sidebar goes at the window's recorded left edge (inside its footprint).
-            -- Window shifts right by sidebarW, keeping its right edge anchored.
             local anchorX  = f.x
             local sidebarX = math.max(anchorX, sf.x)
             local contentX = sidebarX + sidebarW
@@ -595,15 +628,12 @@ function obj:handleWindowMoveOrResize()
             if maxW <= 0 then return end
             local contentW = math.min(f.w - sidebarW, maxW)
 
-            -- Set pending frame so buildSidebar/computeLayout use new position
             self._pendingSidebarFrame = { x = sidebarX, y = f.y, w = sidebarW, h = f.h }
             self._currentScreen = winScreen
 
-            -- Tile all windows into the adjusted content area
             local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
             for _, w in ipairs(wins) do w:setFrame(newFrame) end
 
-            -- Rebuild canvases at the new position
             self:buildSidebar()
         end
     end)
@@ -620,17 +650,16 @@ end
 --- Parameters:
 ---  * mapping - A table with keys: toggle, newWindow, refresh
 ---    Each value is a table: { modifiers, key }
----    e.g. { toggle = {{"cmd","shift"}, "A"}, newWindow = {{"cmd","shift"}, "N"}, refresh = {{"cmd","shift"}, "R"} }
 function obj:bindHotkeys(mapping)
     local map = mapping or {}
 
-    local toggleMods, toggleKey = table.unpack(map.toggle or {{"cmd","shift"}, "A"})
-    local newWinMods, newWinKey = table.unpack(map.newWindow or {{"cmd","shift"}, "N"})
-    local refreshMods, refreshKey = table.unpack(map.refresh or {{"cmd","shift"}, "R"})
-    local renameMods, renameKey = table.unpack(map.renameWindow or {{"cmd","shift"}, "W"})
-    local moveUpMods, moveUpKey = table.unpack(map.moveUp or {{"cmd","shift"}, "["})
-    local moveDownMods, moveDownKey = table.unpack(map.moveDown or {{"cmd","shift"}, "]"})
-    local moveTopMods, moveTopKey = table.unpack(map.moveToTop or {{"cmd","shift"}, "up"})
+    local toggleMods, toggleKey         = table.unpack(map.toggle       or {{"cmd","shift"}, "A"})
+    local newWinMods, newWinKey         = table.unpack(map.newWindow    or {{"cmd","shift"}, "N"})
+    local refreshMods, refreshKey       = table.unpack(map.refresh      or {{"cmd","shift"}, "R"})
+    local renameMods, renameKey         = table.unpack(map.renameWindow or {{"cmd","shift"}, "W"})
+    local moveUpMods, moveUpKey         = table.unpack(map.moveUp       or {{"cmd","shift"}, "["})
+    local moveDownMods, moveDownKey     = table.unpack(map.moveDown     or {{"cmd","shift"}, "]"})
+    local moveTopMods, moveTopKey       = table.unpack(map.moveToTop    or {{"cmd","shift"}, "up"})
     local moveBottomMods, moveBottomKey = table.unpack(map.moveToBottom or {{"cmd","shift"}, "down"})
 
     hs.hotkey.bind(toggleMods, toggleKey, function()
@@ -638,12 +667,10 @@ function obj:bindHotkeys(mapping)
             if self.sidebarCanvas:isVisible() then
                 self.sidebarCanvas:hide()
             else
-                self:buildSidebar()
-                self:tileITermWindows()
+                self:buildSidebar(); self:tileITermWindows()
             end
         else
-            self:buildSidebar()
-            self:tileITermWindows()
+            self:buildSidebar(); self:tileITermWindows()
         end
     end)
 
@@ -652,22 +679,15 @@ function obj:bindHotkeys(mapping)
         if iterm then
             iterm:activate()
             hs.eventtap.keyStroke({"cmd"}, "n")
-            hs.timer.doAfter(0.5, function()
-                self:buildSidebar()
-                self:tileITermWindows()
-            end)
+            hs.timer.doAfter(0.5, function() self:buildSidebar(); self:tileITermWindows() end)
         else
             hs.application.open("com.googlecode.iterm2")
-            hs.timer.doAfter(1.0, function()
-                self:buildSidebar()
-                self:tileITermWindows()
-            end)
+            hs.timer.doAfter(1.0, function() self:buildSidebar(); self:tileITermWindows() end)
         end
     end)
 
     hs.hotkey.bind(refreshMods, refreshKey, function()
-        self:buildSidebar()
-        self:tileITermWindows()
+        self:buildSidebar(); self:tileITermWindows()
     end)
 
     hs.hotkey.bind(renameMods, renameKey, function()
@@ -695,11 +715,7 @@ end
 -- Spoon API: start / stop
 -- ─────────────────────────────────────────────
 
---- iTerm2Axis:start()
---- Method
---- Start iTerm2Axis: build UI, attach watchers, and start mouse tap.
 function obj:start()
-    -- Mouse tap
     if self._mouseTap then self._mouseTap:stop() end
     self._mouseTap = hs.eventtap.new(
         {
@@ -738,12 +754,11 @@ function obj:start()
                     return true
                 end
             end
-             return false
+            return false
         end
     )
     self._mouseTap:start()
 
-    -- Window watcher
     if self._winWatcher then self._winWatcher:stop() end
     self._winWatcher = hs.window.filter.new("iTerm2")
     self._winWatcher:subscribe("windowCreated", function(win)
@@ -757,17 +772,15 @@ function obj:start()
                 self._windowWatchers[id]:stop()
                 self._windowWatchers[id] = nil
             end
-            -- Clear git cache for destroyed window
             _gitBranchCache[id] = nil
             _gitTitleCache[id]  = nil
         end
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowTitleChanged", function(win)
-        -- Invalidate the git cache for this window so getGitBranchForWindow re-checks
         if win then
             local id = win:id()
-            _gitTitleCache[id] = nil  -- force re-evaluation on next buildSidebar
+            _gitTitleCache[id] = nil
         end
         hs.timer.doAfter(0.1, function() self:buildSidebar() end)
     end)
@@ -780,22 +793,18 @@ function obj:start()
         end
     end)
 
-    -- Seed uielement watchers for already-open iTerm windows
     for _, win in ipairs(getITermWindows()) do
         self:watchWindow(win)
     end
 
-    -- Screen watcher
     if self._screenWatcher then self._screenWatcher:stop() end
     self._screenWatcher = hs.screen.watcher.new(function()
         hs.timer.doAfter(0.3, function()
-            self:buildSidebar()
-            self:tileITermWindows()
+            self:buildSidebar(); self:tileITermWindows()
         end)
     end)
     self._screenWatcher:start()
 
-    -- Build initial UI (git info populated lazily on first buildSidebar)
     self:buildSidebar()
     self:tileITermWindows()
 
@@ -803,30 +812,20 @@ function obj:start()
     return self
 end
 
---- iTerm2Axis:stop()
---- Method
---- Stop iTerm2Axis: tear down UI and watchers.
 function obj:stop()
-    if self._mouseTap    then self._mouseTap:stop();    self._mouseTap    = nil end
-    if self._winWatcher  then self._winWatcher:stop();  self._winWatcher  = nil end
+    if self._mouseTap      then self._mouseTap:stop();      self._mouseTap      = nil end
+    if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
-    for _, w in pairs(self._windowWatchers or {}) do
-        w:stop()
-    end
+    for _, w in pairs(self._windowWatchers or {}) do w:stop() end
     self._windowWatchers = {}
-     if self.sidebarCanvas   then self.sidebarCanvas:delete();   self.sidebarCanvas   = nil end
-     if self._tipCanvas      then self._tipCanvas:delete();      self._tipCanvas      = nil end
-     if self._tipKey         then self._tipKey:delete();         self._tipKey         = nil end
-     _gitBranchCache = {}
-     _gitTitleCache  = {}
-     return self
+    if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
+    if self._tipCanvas    then self._tipCanvas:delete();    self._tipCanvas    = nil end
+    if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
+    _gitBranchCache = {}
+    _gitTitleCache  = {}
+    return self
 end
 
---- iTerm2Axis:init()
---- Method
---- Called automatically by hs.loadSpoon(). Sets up the Spoon but does not
---- start watchers or build UI. Call :start() (and optionally :bindHotkeys())
---- to activate.
 function obj:init()
     self.windows        = {}
     self.sidebarCanvas  = nil
@@ -840,12 +839,12 @@ function obj:init()
     self._screenWatcher  = nil
     self._tipCanvas      = nil
     self._tipKey         = nil
-     self._windowWatchers    = {}
-     self._customNames       = {}
-     self._orderedWindowIds  = {}
-     _gitBranchCache         = {}
-     _gitTitleCache          = {}
-     return self
+    self._windowWatchers   = {}
+    self._customNames      = {}
+    self._orderedWindowIds = {}
+    _gitBranchCache        = {}
+    _gitTitleCache         = {}
+    return self
 end
 
 return obj
