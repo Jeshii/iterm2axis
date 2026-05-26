@@ -16,11 +16,10 @@ obj.license  = "MIT - https://opensource.org/licenses/MIT"
 obj.homepage = "https://github.com/Jeshii/iterm2axis"
 
 obj.config = {
-    sidebarWidth      = 160,
+    sidebarWidth      = 200,
     sidebarColor      = { red = 0.12, green = 0.12, blue = 0.14, alpha = 0.95 },
     buttonColor       = { red = 0.2,  green = 0.2,  blue = 0.22, alpha = 1 },
-    buttonHoverColor  = { red = 0.3,  green = 0.3,  blue = 0.35, alpha = 1 },
-    activeButtonColor = { red = 0.25, green = 0.5,  blue = 0.8,  alpha = 1 },
+    activeButtonColor = { red = 0.25, green = 0.4,  blue = 0.6,  alpha = 1 },
     textColor         = { red = 0.9,  green = 0.9,  blue = 0.9,  alpha = 1 },
 
     windowButtonHeight = 90,  -- tall enough for 5 lines (opencode + claudecode)
@@ -143,30 +142,60 @@ end
 -- Per-window git branch cache, keyed by windowId.
 -- Uses hs.task for async git lookups so buildSidebar never blocks.
 local _gitBranchCache   = {}  -- [windowId] = branch string or false
-local _gitTitleCache    = {}  -- [windowId] = last title seen
 local _gitBranchPending = {}  -- [windowId] = true (fetch in flight)
 
-local function getGitBranchForWindow(win)
+-- Per-window working directory cache, keyed by windowId.
+-- Invalidated on windowTitleChanged (which fires when PWD changes with shell integration).
+local _wdCache  = {}  -- [windowId] = path string or false
+local _wdFlight = {}  -- [windowId] = true (fetch in flight)
+
+local function getWindowWorkingDir(win)
     if not win then return nil end
     local winId = win:id()
-    local title = win:title() or ""
 
-    if _gitTitleCache[winId] == title then
+    if _wdCache[winId] ~= nil then
+        return _wdCache[winId] or nil
+    end
+
+    if _wdFlight[winId] then return _wdCache[winId] or nil end
+    _wdFlight[winId] = true
+
+    local script = string.format([[
+        tell application "iTerm2"
+            try
+                tell (first window whose id is %d)
+                    tell current session
+                        return variable named "session.path"
+                    end tell
+                end tell
+            on error
+                return ""
+            end try
+        end tell
+    ]], winId)
+
+    hs.task.new("/usr/bin/osascript", function(exitCode, stdout, stderr)
+        _wdFlight[winId] = nil
+        local path = stdout and stdout:gsub("%s+$", "")
+        _wdCache[winId] = (path and path ~= "") and path or false
+        if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+            obj:buildSidebar()
+        end
+    end, {"-e", script}):start()
+
+    return _wdCache[winId] or nil
+end
+
+local function getGitBranchForPath(path, winId)
+    if not path or not winId then return nil end
+
+    if _gitBranchCache[winId] ~= nil and _wdCache[winId] == path then
         return _gitBranchCache[winId] or nil
     end
-    _gitTitleCache[winId] = title
 
-    if _gitBranchPending[winId] then
-        return _gitBranchCache[winId] or nil
-    end
-
-    local parts = parseTitleComponents(title)
-    if not parts.fullPath then
-        _gitBranchCache[winId] = false
-        return nil
-    end
-
+    if _gitBranchPending[winId] then return _gitBranchCache[winId] or nil end
     _gitBranchPending[winId] = true
+
     hs.task.new("/usr/bin/git", function(_, stdout, _)
         _gitBranchPending[winId] = nil
         local branch = stdout and stdout:gsub("%s+$", "")
@@ -176,7 +205,7 @@ local function getGitBranchForWindow(win)
                 obj:buildSidebar()
             end
         end)
-    end, {"-C", parts.fullPath, "rev-parse", "--abbrev-ref", "HEAD"}):start()
+    end, {"-C", path, "rev-parse", "--abbrev-ref", "HEAD"}):start()
 
     return _gitBranchCache[winId] or nil
 end
@@ -188,9 +217,6 @@ end
 local function shortModelName(id)
     if not id or id == "" then return nil end
     local name = id:match("[^/]+$") or id
-    name = name:gsub(":free$", ""):gsub(":default$", ""):gsub(":high$", ""):gsub(":max$", "")
-    name = name:gsub("^deepseek%-", "ds-")
-    if #name > 14 then name = name:sub(1, 12) .. "…" end
     return name
 end
 
@@ -220,8 +246,9 @@ local _prPending     = {}  -- [windowId] = true (fetch in flight)
 
 local function getOpenPRForWindow(win)
     if not win then return nil end
-    local winId  = win:id()
-    local branch = getGitBranchForWindow(win)
+    local winId    = win:id()
+    local fullPath = getWindowWorkingDir(win)
+    local branch   = fullPath and getGitBranchForPath(fullPath, winId) or nil
     if not branch then _prCache[winId] = false; return nil end
 
     if _prBranchCache[winId] == branch then
@@ -233,8 +260,7 @@ local function getOpenPRForWindow(win)
     end
     _prBranchCache[winId] = branch
 
-    local parts = parseTitleComponents(win:title() or "")
-    if not parts.fullPath then _prCache[winId] = false; return nil end
+    if not fullPath then _prCache[winId] = false; return nil end
 
     _prPending[winId] = true
     hs.task.new("/bin/sh", function(_, stdout, _)
@@ -246,7 +272,7 @@ local function getOpenPRForWindow(win)
                 obj:buildSidebar()
             end
         end)
-    end, {"-c", "cd '" .. parts.fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"}):start()
+    end, {"-c", "cd '" .. fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"}):start()
 
     return _prCache[winId] or nil
 end
@@ -320,8 +346,8 @@ function obj:fetchOpenCodeData()
     for _ in pairs(newData) do sessionCount = sessionCount + 1 end
     local matchCount = 0
     for _, win in ipairs(getITermWindows()) do
-        local parts = parseTitleComponents(win:title() or "")
-        if parts.fullPath and newData[parts.fullPath] then
+        local fp = getWindowWorkingDir(win)
+        if fp and newData[fp] then
             matchCount = matchCount + 1
         end
     end
@@ -349,10 +375,10 @@ function obj:fetchClaudeCodeData()
 
     local wins = getITermWindows()
     for _, win in ipairs(wins) do
-        local parts = parseTitleComponents(win:title() or "")
-        if not parts.fullPath then goto continue end
+        local fullPath = getWindowWorkingDir(win)
+        if not fullPath then goto continue end
 
-        local projectDir = claudeProjectDir(parts.fullPath)
+        local projectDir = claudeProjectDir(fullPath)
         local latestFile = hs.execute(
             "ls -t '" .. projectDir .. "'/*.jsonl 2>/dev/null | head -1"
         ):gsub("%s+$", "")
@@ -379,7 +405,7 @@ function obj:fetchClaudeCodeData()
         end
 
         if model or tokensIn > 0 then
-            newData[parts.fullPath] = {
+            newData[fullPath] = {
                 model     = model,
                 tokensIn  = tokensIn,
                 tokensOut = tokensOut,
@@ -541,6 +567,8 @@ function obj:buildSidebar()
         local btnColor = isActive and cfg.activeButtonColor or cfg.buttonColor
         local rawTitle = win:title() or ""
         local parts    = parseTitleComponents(rawTitle)
+        local fullPath = getWindowWorkingDir(win)
+        local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
 
         -- Button background
         canvas:appendElements({
@@ -555,7 +583,6 @@ function obj:buildSidebar()
         local label = self._customNames[winId]
             or parts.host
             or ("Window " .. i)
-        if #label > 18 then label = label:sub(1, 16) .. "…" end
         canvas:appendElements({
             type          = "text",
             frame         = { x = textX, y = y + 5, w = textW, h = 15 },
@@ -566,9 +593,8 @@ function obj:buildSidebar()
         })
 
         -- ── Line 2: PWD basename ──
-        if parts.basename then
-            local base = parts.basename
-            if #base > 20 then base = base:sub(1, 18) .. "…" end
+        if basename then
+            local base = basename
             canvas:appendElements({
                 type          = "text",
                 frame         = { x = textX, y = y + 22, w = textW, h = 13 },
@@ -580,9 +606,8 @@ function obj:buildSidebar()
         end
 
         -- ── Line 3: git branch ──
-        local branch = getGitBranchForWindow(win)
+        local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
         if branch then
-            if #branch > 20 then branch = branch:sub(1, 18) .. "…" end
             canvas:appendElements({
                 type          = "text",
                 frame         = { x = textX, y = y + 38, w = textW, h = 13 },
@@ -595,8 +620,8 @@ function obj:buildSidebar()
 
         -- ── Line 4: opencode session info ──
         local ocData
-        if parts.fullPath and self._opencodeData[parts.fullPath] then
-            ocData = self._opencodeData[parts.fullPath]
+        if fullPath and self._opencodeData[fullPath] then
+            ocData = self._opencodeData[fullPath]
         else
             for _, data in pairs(self._opencodeData or {}) do
                 if data.title and rawTitle:find(data.title, 1, true) then
@@ -620,7 +645,6 @@ function obj:buildSidebar()
             if agentStr ~= "" then table.insert(segments, agentStr) end
             if tokStr ~= "" then table.insert(segments, tokStr) end
             local ocText = table.concat(segments, "  ")
-            if #ocText > 26 then ocText = ocText:sub(1, 24) .. "…" end
             canvas:appendElements({
                 type          = "text",
                 frame         = { x = textX, y = y + 53, w = textW, h = 12 },
@@ -632,7 +656,7 @@ function obj:buildSidebar()
         end
 
         -- ── Line 5: Claude Code session info ──
-        local ccData = self._claudeCodeData and self._claudeCodeData[parts.fullPath]
+        local ccData = fullPath and self._claudeCodeData and self._claudeCodeData[fullPath]
         if ccData then
             local modelShort = shortModelName(ccData.model) or ""
             local tokStr = ""
@@ -646,7 +670,6 @@ function obj:buildSidebar()
             if tokStr     ~= "" then table.insert(segments, tokStr) end
             if prStr      ~= "" then table.insert(segments, prStr) end
             local ccText = table.concat(segments, "  ")
-            if #ccText > 26 then ccText = ccText:sub(1, 24) .. "…" end
             canvas:appendElements({
                 type          = "text",
                 frame         = { x = textX, y = y + 68, w = textW, h = 12 },
@@ -761,7 +784,6 @@ function obj:showWindowMenu(windowId)
     if oc then
         local modelStr = shortModelName(oc.modelID) or "?"
         local titleStr = oc.title or "Untitled"
-        if #titleStr > 40 then titleStr = titleStr:sub(1, 38) .. "…" end
         table.insert(choices, 1, {
             text = "OpenCode: " .. modelStr .. " (" .. (oc.agent or "?") .. ")",
             subText = titleStr .. "  ·  " .. fmtTokens(oc.tokensIn or 0) .. " in, " .. fmtTokens(oc.tokensOut or 0) .. " out",
@@ -1151,18 +1173,20 @@ function obj:start()
                 self._windowWatchers[id] = nil
             end
             _gitBranchCache[id]   = nil
-            _gitTitleCache[id]    = nil
             _gitBranchPending[id] = nil
             _prCache[id]         = nil
             _prBranchCache[id]   = nil
             _prPending[id]       = nil
+            _wdCache[id]         = nil
+            _wdFlight[id]        = nil
         end
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowTitleChanged", function(win)
         if win then
             local id = win:id()
-            _gitTitleCache[id] = nil
+            _wdCache[id] = nil
+            _gitBranchCache[id] = nil
         end
         hs.timer.doAfter(0.1, function() self:buildSidebar() end)
     end)
@@ -1213,13 +1237,14 @@ function obj:stop()
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
     if self._tipCanvas    then self._tipCanvas:delete();    self._tipCanvas    = nil end
     if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
-    _gitBranchCache   = {}
-    _gitTitleCache    = {}
-    _gitBranchPending = {}
-    _prCache         = {}
-    _prBranchCache   = {}
-    _prPending       = {}
-    if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
+     _gitBranchCache   = {}
+     _gitBranchPending = {}
+     _prCache         = {}
+     _prBranchCache   = {}
+     _prPending       = {}
+     _wdCache         = {}
+     _wdFlight        = {}
+     if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     return self
 end
@@ -1245,13 +1270,14 @@ function obj:init()
     self._claudeCodeData      = {}
     self._claudeCodePollTimer = nil
     self._ghAvailable         = false
-    _gitBranchCache        = {}
-    _gitTitleCache         = {}
-    _gitBranchPending      = {}
-    _prCache               = {}
-    _prBranchCache         = {}
-    _prPending             = {}
-    return self
+     _gitBranchCache   = {}
+     _gitBranchPending = {}
+     _prCache          = {}
+     _prBranchCache    = {}
+     _prPending        = {}
+     _wdCache          = {}
+     _wdFlight         = {}
+     return self
 end
 
 return obj
