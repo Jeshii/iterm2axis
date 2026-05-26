@@ -200,6 +200,9 @@ local function getGitBranchForPath(path, winId)
     hs.task.new("/usr/bin/git", function(_, stdout, _)
         _gitBranchPending[winId] = nil
         local branch = stdout and stdout:gsub("%s+$", "")
+        if not branch or branch == "" or branch == "HEAD" then
+            branch = hs.execute("git -C '" .. path .. "' worktree list --porcelain 2>/dev/null | grep 'branch' | head -1 | sed 's/branch refs\\/heads\\///'"):gsub("%s+$", "")
+        end
         _gitBranchCache[winId] = (branch and branch ~= "") and branch or false
         hs.timer.doAfter(0, function()
             if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
@@ -1234,9 +1237,12 @@ function obj:start()
     self._winWatcher:subscribe("windowTitleChanged", function(win)
         if win then
             local id = win:id()
-            _wdCache[id] = nil
-            _gitBranchCache[id] = nil
-            -- Only start flashing if this window is NOT the active/focused window
+            local title = win:title() or ""
+            local isCCStateChange = title:match("^✳") or title:match("^·")
+            if not isCCStateChange then
+                _wdCache[id] = nil
+                _gitBranchCache[id] = nil
+            end
             local focusedWin = hs.window.focusedWindow()
             local isFocused  = focusedWin and focusedWin:id() == id
             local state = claudeState(win)
@@ -1252,6 +1258,10 @@ function obj:start()
         self:handleWindowMoveOrResize()
     end)
     self._winWatcher:subscribe("windowFocused", function(win)
+        if self._mouseTap then
+            self._mouseTap:stop()
+            self._mouseTap:start()
+        end
         if win and isITerm(win) then
             stopFlashing(win:id())
         end
