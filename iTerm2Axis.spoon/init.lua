@@ -34,7 +34,7 @@ obj.config = {
     claudecode = {
         enabled       = true,
         pollInterval  = 5,
-        flashInterval = 0.6,
+        flashInterval = 2.0,
         projectsDir   = os.getenv("HOME") .. "/.claude/projects",
     },
 }
@@ -601,8 +601,10 @@ function obj:buildSidebar()
         local isActive = (winId == self.activeWindowId)
         local state    = claudeState(win)
         local btnColor
-        if state == "waiting" and _flashState[winId] then
-            btnColor = { red = 0.6, green = 0.45, blue = 0.9, alpha = 1 }
+        local focusedWin = hs.window.focusedWindow()
+        local isFocused  = focusedWin and focusedWin:id() == winId
+        if state == "waiting" and _flashState[winId] and not isFocused then
+            btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
         elseif state == "busy" then
             btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
         elseif isActive then
@@ -757,6 +759,7 @@ end
 function obj:bringWindowToFront(windowId)
     local win = hs.window.get(windowId)
     if not win then return end
+    stopFlashing(windowId)        -- ← add this before focus
     self.activeWindowId = windowId
     win:raise()
     win:focus()
