@@ -215,8 +215,9 @@ local function getGitBranchForPath(path, winId)
 end
 
 -- Per-window Claude Code flash state for ✳ waiting indicator.
-local _flashTimers = {}
-local _flashState  = {}
+local _flashTimers      = {}
+local _flashState       = {}
+local _flashNormalColor = {}
 
 local function claudeState(win)
     local title = win:title() or ""
@@ -228,10 +229,16 @@ end
 local function startFlashing(winId)
     if _flashTimers[winId] then return end
     _flashState[winId] = true
+    local isActive = (winId == obj.activeWindowId)
+    _flashNormalColor[winId] = isActive and obj.config.activeButtonColor or obj.config.buttonColor
     _flashTimers[winId] = hs.timer.new(obj.config.claudecode.flashInterval, function()
         _flashState[winId] = not _flashState[winId]
-        if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
-            obj:buildSidebar()
+        local bgIdx = obj._btnBgElements[winId]
+        if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+            local newColor = _flashState[winId]
+                and { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+                or _flashNormalColor[winId]
+            obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
         end
     end)
     _flashTimers[winId]:start()
@@ -243,8 +250,13 @@ local function stopFlashing(winId)
         _flashTimers[winId] = nil
     end
     _flashState[winId] = nil
-    if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
-        obj:buildSidebar()
+    local normalColor = _flashNormalColor[winId]
+    _flashNormalColor[winId] = nil
+    if normalColor and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+        local bgIdx = obj._btnBgElements[winId]
+        if bgIdx then
+            obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(normalColor))
+        end
     end
 end
 
@@ -596,8 +608,11 @@ function obj:buildSidebar()
         itermWins = ordered
     end
 
-    local textW = sb.w - cfg.padding * 2 - 12
-    local textX = cfg.padding + 6
+    local textW    = sb.w - cfg.padding * 2 - 12
+    local textX    = cfg.padding + 6
+    local elemIdx  = 3
+
+    self._btnBgElements = {}
 
     for i, win in ipairs(itermWins) do
         local winId    = win:id()
@@ -628,6 +643,8 @@ function obj:buildSidebar()
             strokeWidth = 0,
             roundedRectRadii = { xRadius = 4, yRadius = 4 },
         })
+        self._btnBgElements[winId] = elemIdx
+        elemIdx = elemIdx + 1
 
         -- ── Line 1: custom rename → hostname → "Window N" fallback ──
         local label = self._customNames[winId]
@@ -641,6 +658,7 @@ function obj:buildSidebar()
             textSize      = 11,
             textAlignment = "left",
         })
+        elemIdx = elemIdx + 1
 
         -- ── Line 2: PWD basename ──
         if basename then
@@ -653,6 +671,7 @@ function obj:buildSidebar()
                 textSize      = 10,
                 textAlignment = "left",
             })
+            elemIdx = elemIdx + 1
         end
 
         -- ── Line 3: git branch ──
@@ -666,6 +685,7 @@ function obj:buildSidebar()
                 textSize      = 10,
                 textAlignment = "left",
             })
+            elemIdx = elemIdx + 1
         end
 
         -- ── Line 4: opencode session info ──
@@ -703,6 +723,7 @@ function obj:buildSidebar()
                 textSize      = 9,
                 textAlignment = "left",
             })
+            elemIdx = elemIdx + 1
         end
 
         -- ── Line 5: Claude Code session info ──
@@ -728,6 +749,7 @@ function obj:buildSidebar()
                 textSize      = 9,
                 textAlignment = "left",
             })
+            elemIdx = elemIdx + 1
         end
 
         self._buttonFrames[i] = {
@@ -1271,7 +1293,9 @@ function obj:start()
                 stopFlashing(id)
             end
         end
-        hs.timer.doAfter(0.1, function() self:buildSidebar() end)
+        if not isCCStateChange then
+            hs.timer.doAfter(0.1, function() self:buildSidebar() end)
+        end
     end)
     self._winWatcher:subscribe("windowMoved", function()
         self:handleWindowMoveOrResize()
@@ -1344,6 +1368,7 @@ function obj:stop()
      for _, t in pairs(_flashTimers) do t:stop() end
      _flashTimers = {}
      _flashState  = {}
+     _flashNormalColor = {}
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     return self
@@ -1370,6 +1395,7 @@ function obj:init()
     self._claudeCodeData      = {}
     self._claudeCodePollTimer = nil
     self._ghAvailable         = false
+    self._btnBgElements       = {}
      _gitBranchCache   = {}
      _gitBranchPending = {}
      _prCache          = {}
@@ -1379,6 +1405,7 @@ function obj:init()
      _wdFlight         = {}
      _flashTimers      = {}
      _flashState       = {}
+     _flashNormalColor = {}
      return self
 end
 
