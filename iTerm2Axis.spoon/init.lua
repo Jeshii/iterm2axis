@@ -32,9 +32,10 @@ obj.config = {
     },
 
     claudecode = {
-        enabled      = true,
-        pollInterval = 5,
-        projectsDir  = os.getenv("HOME") .. "/.claude/projects",
+        enabled       = true,
+        pollInterval  = 5,
+        flashInterval = 0.6,
+        projectsDir   = os.getenv("HOME") .. "/.claude/projects",
     },
 }
 
@@ -208,6 +209,38 @@ local function getGitBranchForPath(path, winId)
     end, {"-C", path, "rev-parse", "--abbrev-ref", "HEAD"}):start()
 
     return _gitBranchCache[winId] or nil
+end
+
+-- Per-window Claude Code flash state for ✳ waiting indicator.
+local _flashTimers = {}
+local _flashState  = {}
+
+local function isClaudeWaiting(win)
+    local title = win:title() or ""
+    return title:sub(1, 3) == "✳"
+end
+
+local function startFlashing(winId)
+    if _flashTimers[winId] then return end
+    _flashState[winId] = true
+    _flashTimers[winId] = hs.timer.new(obj.config.claudecode.flashInterval, function()
+        _flashState[winId] = not _flashState[winId]
+        if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+            obj:buildSidebar()
+        end
+    end)
+    _flashTimers[winId]:start()
+end
+
+local function stopFlashing(winId)
+    if _flashTimers[winId] then
+        _flashTimers[winId]:stop()
+        _flashTimers[winId] = nil
+    end
+    _flashState[winId] = nil
+    if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+        obj:buildSidebar()
+    end
 end
 
 -- ─────────────────────────────────────────────
@@ -564,7 +597,15 @@ function obj:buildSidebar()
     for i, win in ipairs(itermWins) do
         local winId    = win:id()
         local isActive = (winId == self.activeWindowId)
-        local btnColor = isActive and cfg.activeButtonColor or cfg.buttonColor
+        local isFlashing = _flashState[winId] ~= nil
+        local btnColor
+        if isFlashing and _flashState[winId] then
+            btnColor = { red = 0.6, green = 0.45, blue = 0.9, alpha = 1 }
+        elseif isActive then
+            btnColor = cfg.activeButtonColor
+        else
+            btnColor = cfg.buttonColor
+        end
         local rawTitle = win:title() or ""
         local parts    = parseTitleComponents(rawTitle)
         local fullPath = getWindowWorkingDir(win)
@@ -1179,6 +1220,7 @@ function obj:start()
             _prPending[id]       = nil
             _wdCache[id]         = nil
             _wdFlight[id]        = nil
+            stopFlashing(id)
         end
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
     end)
@@ -1187,6 +1229,11 @@ function obj:start()
             local id = win:id()
             _wdCache[id] = nil
             _gitBranchCache[id] = nil
+            if isClaudeWaiting(win) then
+                startFlashing(id)
+            else
+                stopFlashing(id)
+            end
         end
         hs.timer.doAfter(0.1, function() self:buildSidebar() end)
     end)
@@ -1244,6 +1291,9 @@ function obj:stop()
      _prPending       = {}
      _wdCache         = {}
      _wdFlight        = {}
+     for _, t in pairs(_flashTimers) do t:stop() end
+     _flashTimers = {}
+     _flashState  = {}
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     return self
@@ -1277,6 +1327,8 @@ function obj:init()
      _prPending        = {}
      _wdCache          = {}
      _wdFlight         = {}
+     _flashTimers      = {}
+     _flashState       = {}
      return self
 end
 
