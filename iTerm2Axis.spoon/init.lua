@@ -215,9 +215,11 @@ end
 local _flashTimers = {}
 local _flashState  = {}
 
-local function isClaudeWaiting(win)
+local function claudeState(win)
     local title = win:title() or ""
-    return title:sub(1, 3) == "✳"
+    if title:match("^✳") then return "waiting" end
+    if title:match("^·")  then return "busy"    end
+    return nil
 end
 
 local function startFlashing(winId)
@@ -597,10 +599,12 @@ function obj:buildSidebar()
     for i, win in ipairs(itermWins) do
         local winId    = win:id()
         local isActive = (winId == self.activeWindowId)
-        local isFlashing = _flashState[winId] ~= nil
+        local state    = claudeState(win)
         local btnColor
-        if isFlashing and _flashState[winId] then
+        if state == "waiting" and _flashState[winId] then
             btnColor = { red = 0.6, green = 0.45, blue = 0.9, alpha = 1 }
+        elseif state == "busy" then
+            btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
         elseif isActive then
             btnColor = cfg.activeButtonColor
         else
@@ -1229,18 +1233,19 @@ function obj:start()
             local id = win:id()
             _wdCache[id] = nil
             _gitBranchCache[id] = nil
-            if isClaudeWaiting(win) then
-                startFlashing(id)
-            else
-                stopFlashing(id)
-            end
+            local state = claudeState(win)
+            if state == "waiting" then startFlashing(id)
+            else stopFlashing(id) end
         end
         hs.timer.doAfter(0.1, function() self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowMoved", function()
         self:handleWindowMoveOrResize()
     end)
-    self._winWatcher:subscribe("windowFocused", function()
+    self._winWatcher:subscribe("windowFocused", function(win)
+        if win and isITerm(win) then
+            stopFlashing(win:id())
+        end
         if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
             self:handleWindowMoveOrResize()
         end
