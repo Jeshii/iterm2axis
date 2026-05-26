@@ -43,6 +43,39 @@ obj.config = {
 -- Helpers
 -- ─────────────────────────────────────────────
 
+function obj:debugTitles()
+    local wins = getITermWindows()
+    hs.printf("=== iTerm2Axis Debug: %d windows ===", #wins)
+    for i, win in ipairs(wins) do
+        local title = win:title() or ""
+        local parts = parseTitleComponents(title)
+        hs.printf("Window %d: title=%q", i, title)
+        hs.printf("  host=%s fullPath=%s basename=%s",
+            tostring(parts.host),
+            tostring(parts.fullPath),
+            tostring(parts.basename)
+        )
+        -- Check Claude Code dir
+        if parts.fullPath then
+            local ccDir = claudeProjectDir(parts.fullPath)
+            local ls = hs.execute("ls '" .. ccDir .. "' 2>&1 | head -3")
+            hs.printf("  claudeDir=%s => %s", ccDir, ls:gsub("\n", " | "))
+        end
+        -- Check opencode match
+        if obj._opencodeData then
+            local matched = false
+            for dir, _ in pairs(obj._opencodeData) do
+                if parts.fullPath == dir then matched = true end
+            end
+            hs.printf("  opencode match: %s", tostring(matched))
+        end
+    end
+    hs.printf("=== opencode dirs ===")
+    for dir, data in pairs(obj._opencodeData or {}) do
+        hs.printf("  %s => model=%s", dir, tostring(data.modelID))
+    end
+end
+
 local function isITerm(win)
     if not win then return false end
     local app = win:application()
@@ -1037,6 +1070,10 @@ function obj:bindHotkeys(mapping)
 
     hs.hotkey.bind(moveBottomMods, moveBottomKey, function()
         if self.activeWindowId then self:moveWindowToExtent(self.activeWindowId, "bottom") end
+    end)
+
+    hs.hotkey.bind({"cmd","shift","ctrl"}, "D", function()
+        obj:debugTitles()
     end)
 end
 
