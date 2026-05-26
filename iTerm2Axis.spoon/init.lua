@@ -109,6 +109,8 @@ end
 -- Returns: { host = string|nil, fullPath = string|nil, basename = string|nil }
 local function parseTitleComponents(title)
     if not title or title == "" then return {} end
+    -- Strip iTerm2 dimension suffix e.g. " — 256✕69"
+    title = title:gsub("%s+[—–-]%s+%d+✕%d+%s*$", "")
     local home = os.getenv("HOME") or ""
 
     local host, pathPart
@@ -323,7 +325,6 @@ function obj:fetchOpenCodeData()
             matchCount = matchCount + 1
         end
     end
-    hs.printf("opencode: %d sessions fetched, %d windows matched", sessionCount, matchCount)
 
     self._opencodeData = newData
 end
@@ -1073,7 +1074,18 @@ function obj:bindHotkeys(mapping)
     end)
 
     hs.hotkey.bind({"cmd","shift","ctrl"}, "D", function()
-        obj:debugTitles()
+        local all = hs.window.allWindows()
+        for _, w in ipairs(all) do
+            local app = w:application()
+            if app and app:bundleID() == "com.googlecode.iterm2" then
+                hs.printf("iTerm win %d: title=%q isStandard=%s",
+                    w:id(), w:title() or "", tostring(w:isStandard()))
+            end
+        end
+        hs.printf("opencode dirs:")
+        for dir, _ in pairs(obj._opencodeData or {}) do
+            hs.printf("  %q", dir)
+        end
     end)
 end
 
