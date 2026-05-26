@@ -1022,22 +1022,41 @@ function obj:handleWindowMoveOrResize()
         local wins = getITermWindows()
         if #wins == 0 then return end
 
-        local winScreen     = self:findWindowScreen(wins)
-        local screenChanged = (winScreen ~= self._currentScreen)
-        local cfg           = self.config
+        local focusedWin = hs.window.focusedWindow()
+        local anchorWin
+        if focusedWin and isITerm(focusedWin) then
+            anchorWin = focusedWin
+        else
+            anchorWin = wins[1]
+        end
+
+        local newScreen     = anchorWin:screen()
+        local screenChanged = (newScreen ~= self._currentScreen)
 
         if screenChanged then
-            self._currentScreen       = winScreen
+            for _, win in ipairs(wins) do
+                local id = win:id()
+                _wdCache[id]         = nil
+                _gitBranchCache[id]  = nil
+                _prCache[id]         = nil
+                _prBranchCache[id]   = nil
+            end
+            self._currentScreen       = newScreen
             self._pendingSidebarFrame = nil
+            if self.sidebarCanvas then
+                self.sidebarCanvas:delete()
+                self.sidebarCanvas = nil
+            end
             self:buildSidebar()
             self:tileITermWindows()
             return
         end
 
+        local cfg           = self.config
         local currentAnchor = self:getSidebarAnchor()
-        local expectedX = currentAnchor.x + cfg.sidebarWidth
-        local expectedY = currentAnchor.y
-        local expectedH = currentAnchor.h
+        local expectedX     = currentAnchor.x + cfg.sidebarWidth
+        local expectedY     = currentAnchor.y
+        local expectedH     = currentAnchor.h
 
         local driftedWin = nil
         for i = #wins, 1, -1 do
@@ -1052,7 +1071,7 @@ function obj:handleWindowMoveOrResize()
 
         if driftedWin then
             local f        = driftedWin:frame()
-            local sf       = winScreen:frame()
+            local sf       = newScreen:frame()
             local sidebarW = cfg.sidebarWidth
 
             if f.w <= sidebarW then return end
@@ -1065,7 +1084,7 @@ function obj:handleWindowMoveOrResize()
             local contentW = math.min(f.w - sidebarW, maxW)
 
             self._pendingSidebarFrame = { x = sidebarX, y = f.y, w = sidebarW, h = f.h }
-            self._currentScreen = winScreen
+            self._currentScreen = newScreen
 
             local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
             for _, w in ipairs(wins) do w:setFrame(newFrame) end
@@ -1277,7 +1296,14 @@ function obj:start()
     if self._screenWatcher then self._screenWatcher:stop() end
     self._screenWatcher = hs.screen.watcher.new(function()
         hs.timer.doAfter(0.3, function()
-            self:buildSidebar(); self:tileITermWindows()
+            self._pendingSidebarFrame = nil
+            self._currentScreen = nil
+            if self.sidebarCanvas then
+                self.sidebarCanvas:delete()
+                self.sidebarCanvas = nil
+            end
+            self:buildSidebar()
+            self:tileITermWindows()
         end)
     end)
     self._screenWatcher:start()
