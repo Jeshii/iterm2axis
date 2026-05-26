@@ -1233,9 +1233,15 @@ function obj:start()
             local id = win:id()
             _wdCache[id] = nil
             _gitBranchCache[id] = nil
+            -- Only start flashing if this window is NOT the active/focused window
+            local focusedWin = hs.window.focusedWindow()
+            local isFocused  = focusedWin and focusedWin:id() == id
             local state = claudeState(win)
-            if state == "waiting" then startFlashing(id)
-            else stopFlashing(id) end
+            if state == "waiting" and not isFocused then
+                startFlashing(id)
+            else
+                stopFlashing(id)
+            end
         end
         hs.timer.doAfter(0.1, function() self:buildSidebar() end)
     end)
