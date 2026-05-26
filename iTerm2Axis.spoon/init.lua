@@ -106,53 +106,44 @@ local function parseTitleComponents(title)
 end
 
 -- Per-window git branch cache, keyed by windowId.
--- Only re-runs `git rev-parse` when a window's title actually changes.
-local _gitBranchCache = {}  -- [windowId] = branch string or false
-local _gitTitleCache  = {}  -- [windowId] = last title seen
+-- Uses hs.task for async git lookups so buildSidebar never blocks.
+local _gitBranchCache   = {}  -- [windowId] = branch string or false
+local _gitTitleCache    = {}  -- [windowId] = last title seen
+local _gitBranchPending = {}  -- [windowId] = true (fetch in flight)
 
 local function getGitBranchForWindow(win)
     if not win then return nil end
     local winId = win:id()
     local title = win:title() or ""
 
-    -- Return cached value if title hasn't changed
     if _gitTitleCache[winId] == title then
         return _gitBranchCache[winId] or nil
     end
-
-    -- Title changed (or first run) — update caches
     _gitTitleCache[winId] = title
 
-    local home = os.getenv("HOME") or ""
-    local branch
+    if _gitBranchPending[winId] then
+        return _gitBranchCache[winId] or nil
+    end
+
     local parts = parseTitleComponents(title)
-
-    -- Strategy 1: use the full path extracted from the title
-    if parts.fullPath then
-        branch = hs.execute("git -C '" .. parts.fullPath .. "' rev-parse --abbrev-ref HEAD 2>/dev/null")
+    if not parts.fullPath then
+        _gitBranchCache[winId] = false
+        return nil
     end
 
-    -- Strategy 2: fall back to treating basename as a dir under $HOME
-    if (not branch or branch:gsub("%s+", "") == "") and parts.basename then
-        branch = hs.execute(
-            "git -C '" .. home .. "/" .. parts.basename .. "' rev-parse --abbrev-ref HEAD 2>/dev/null"
-        )
-    end
-
-    -- Strategy 3: match by opencode session title in window title
-    if (not branch or branch:gsub("%s+", "") == "") and obj._opencodeData then
-        for dir, data in pairs(obj._opencodeData) do
-            if data.title and title:find(data.title, 1, true) then
-                branch = hs.execute("git -C '" .. dir .. "' rev-parse --abbrev-ref HEAD 2>/dev/null")
-                if branch and branch:gsub("%s+", "") ~= "" then break end
+    _gitBranchPending[winId] = true
+    hs.task.new("/usr/bin/git", function(_, stdout, _)
+        _gitBranchPending[winId] = nil
+        local branch = stdout and stdout:gsub("%s+$", "")
+        _gitBranchCache[winId] = (branch and branch ~= "") and branch or false
+        hs.timer.doAfter(0, function()
+            if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+                obj:buildSidebar()
             end
-        end
-    end
+        end)
+    end, {"-C", parts.fullPath, "rev-parse", "--abbrev-ref", "HEAD"}):start()
 
-    branch = branch and branch:gsub("%s+$", "")
-    local result = (branch and branch ~= "") and branch or false
-    _gitBranchCache[winId] = result
-    return result or nil
+    return _gitBranchCache[winId] or nil
 end
 
 -- ─────────────────────────────────────────────
@@ -187,8 +178,10 @@ local function claudeProjectDir(absPath)
 end
 
 -- Per-window PR cache, keyed by windowId.
+-- Uses hs.task for async gh pr view so buildSidebar never blocks.
 local _prCache       = {}  -- [windowId] = { number, title } or false
 local _prBranchCache = {}  -- [windowId] = branch string last checked
+local _prPending     = {}  -- [windowId] = true (fetch in flight)
 
 local function getOpenPRForWindow(win)
     if not win then return nil end
@@ -199,21 +192,28 @@ local function getOpenPRForWindow(win)
     if _prBranchCache[winId] == branch then
         return _prCache[winId] or nil
     end
+
+    if _prPending[winId] then
+        return _prCache[winId] or nil
+    end
     _prBranchCache[winId] = branch
 
     local parts = parseTitleComponents(win:title() or "")
     if not parts.fullPath then _prCache[winId] = false; return nil end
 
-    local result = hs.execute(
-        "cd '" .. parts.fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"
-    )
-    local ok, pr = pcall(hs.json.decode, result or "")
-    if ok and pr and pr.number then
-        _prCache[winId] = pr
-        return pr
-    end
-    _prCache[winId] = false
-    return nil
+    _prPending[winId] = true
+    hs.task.new("/bin/sh", function(_, stdout, _)
+        _prPending[winId] = nil
+        local ok, pr = pcall(hs.json.decode, stdout or "")
+        _prCache[winId] = (ok and pr and pr.number) and pr or false
+        hs.timer.doAfter(0, function()
+            if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+                obj:buildSidebar()
+            end
+        end)
+    end, {"-c", "cd '" .. parts.fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"}):start()
+
+    return _prCache[winId] or nil
 end
 
 function obj:fetchOpenCodeData()
@@ -1101,10 +1101,12 @@ function obj:start()
                 self._windowWatchers[id]:stop()
                 self._windowWatchers[id] = nil
             end
-            _gitBranchCache[id] = nil
-            _gitTitleCache[id]  = nil
-            _prCache[id]       = nil
-            _prBranchCache[id] = nil
+            _gitBranchCache[id]   = nil
+            _gitTitleCache[id]    = nil
+            _gitBranchPending[id] = nil
+            _prCache[id]         = nil
+            _prBranchCache[id]   = nil
+            _prPending[id]       = nil
         end
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
     end)
@@ -1162,10 +1164,12 @@ function obj:stop()
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
     if self._tipCanvas    then self._tipCanvas:delete();    self._tipCanvas    = nil end
     if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
-    _gitBranchCache = {}
-    _gitTitleCache  = {}
-    _prCache       = {}
-    _prBranchCache = {}
+    _gitBranchCache   = {}
+    _gitTitleCache    = {}
+    _gitBranchPending = {}
+    _prCache         = {}
+    _prBranchCache   = {}
+    _prPending       = {}
     if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     return self
@@ -1194,8 +1198,10 @@ function obj:init()
     self._ghAvailable         = false
     _gitBranchCache        = {}
     _gitTitleCache         = {}
+    _gitBranchPending      = {}
     _prCache               = {}
     _prBranchCache         = {}
+    _prPending             = {}
     return self
 end
 
