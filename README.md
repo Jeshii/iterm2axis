@@ -28,8 +28,8 @@ spoon.iTerm2Axis:bindHotkeys({
     moveDown     = {{"cmd", "shift"}, "]"},
     moveToTop    = {{"cmd", "shift"}, "up"},
     moveToBottom = {{"cmd", "shift"}, "down"},
-    focusUp      = {{"ctrl", "alt", "cmd"}, "up"},
-    focusDown    = {{"ctrl", "alt", "cmd"}, "down"},
+    focusUp      = {{"alt", "cmd"}, "up"},
+    focusDown    = {{"alt", "cmd"}, "down"},
 })
 ```
 
@@ -54,15 +54,15 @@ All hotkeys have built-in defaults but **are only registered when you call `bind
 | ⌘⇧] | `moveDown` | Move active window down the sidebar |
 | ⌘⇧↑ | `moveToTop` | Move active window to top of sidebar |
 | ⌘⇧↓ | `moveToBottom` | Move active window to bottom of sidebar |
-| ⌃⌥⌘↑ | `focusUp` | Focus the previous window in the sidebar |
-| ⌃⌥⌘↓ | `focusDown` | Focus the next window in the sidebar |
+| ⌥⌘↑ | `focusUp` | Focus the previous window in the sidebar |
+| ⌥⌘↓ | `focusDown` | Focus the next window in the sidebar |
 
 To override a combo, pass your preferred value in the `bindHotkeys` call:
 
 ```lua
 spoon.iTerm2Axis:bindHotkeys({
-    focusUp   = {{"alt", "cmd"}, "up"},   -- override
-    focusDown = {{"alt", "cmd"}, "down"}, -- override
+    focusUp   = {{"ctrl", "alt", "cmd"}, "up"},   -- override
+    focusDown = {{"ctrl", "alt", "cmd"}, "down"}, -- override
     -- all other keys will use their defaults
 })
 ```
@@ -75,13 +75,3 @@ Customise `spoon.iTerm2Axis.config` before calling `:start()`:
 spoon.iTerm2Axis.config.sidebarWidth = 200
 spoon.iTerm2Axis.config.activeButtonColor = {red=0.8, green=0.3, blue=0.1, alpha=1}
 ```
-
-## iTerm2 Key Binding Conflicts
-
-Some key combos (e.g. `⌥⌘↑`) may be intercepted by iTerm2 before Hammerspoon sees them, producing escape sequences in the terminal instead of switching windows. If this happens:
-
-1. Open **iTerm2 → Settings → Keys → Key Bindings**
-2. Look for any binding that matches your chosen combo
-3. Delete or reassign it
-
-The default `⌃⌥⌘↑` / `⌃⌥⌘↓` combos are chosen specifically to avoid iTerm2's built-in bindings.
