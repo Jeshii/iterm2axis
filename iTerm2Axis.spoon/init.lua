@@ -551,221 +551,229 @@ end
 function obj:buildSidebar()
     if self._buildPending then return end
     self._buildPending = true
-    if self.sidebarCanvas then
-        if not self._pendingSidebarFrame then
-            self._pendingSidebarFrame = self.sidebarCanvas:frame()
-        end
-        self.sidebarCanvas:delete()
-        self.sidebarCanvas = nil
-    end
 
-    local layout = self:computeLayout()
-    local sb  = layout.sidebar
-    local cfg = self.config
-
-    local canvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
-    canvas:level(hs.canvas.windowLevels.floating)
-    canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
-    canvas:alpha(1)
-
-    -- Background
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = 0, y = 0, w = sb.w, h = sb.h },
-        fillColor = color(cfg.sidebarColor),
-        strokeWidth = 0,
-    })
-
-    -- Right border
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = sb.w - 1, y = 0, w = 1, h = sb.h },
-        fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
-        strokeWidth = 0,
-    })
-
-    -- Window buttons
-    local itermWins = getITermWindows()
-    local y = 6
-    self._buttonFrames = {}
-
-    -- If we have a saved ordering, reorder itermWins to match
-    if self._orderedWindowIds and #self._orderedWindowIds > 0 then
-        local winMap = {}
-        for _, win in ipairs(itermWins) do
-            winMap[win:id()] = win
-        end
-        local ordered = {}
-        for _, wid in ipairs(self._orderedWindowIds) do
-            if winMap[wid] then
-                table.insert(ordered, winMap[wid])
-                winMap[wid] = nil
+    local ok, err = pcall(function()
+        if self.sidebarCanvas then
+            if not self._pendingSidebarFrame then
+                self._pendingSidebarFrame = self.sidebarCanvas:frame()
             end
+            self.sidebarCanvas:delete()
+            self.sidebarCanvas = nil
         end
-        for _, win in ipairs(itermWins) do
-            if winMap[win:id()] then
-                table.insert(ordered, win)
-            end
-        end
-        itermWins = ordered
-    end
 
-    local textW    = sb.w - cfg.padding * 2 - 12
-    local textX    = cfg.padding + 6
-    local elemIdx  = 3
+        local layout = self:computeLayout()
+        local sb  = layout.sidebar
+        local cfg = self.config
 
-    self._btnBgElements = {}
+        local canvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
+        canvas:level(hs.canvas.windowLevels.floating)
+        canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+        canvas:alpha(1)
 
-    for i, win in ipairs(itermWins) do
-        local winId    = win:id()
-        local isActive = (winId == self.activeWindowId)
-        local state    = claudeState(win)
-        local btnColor
-        local focusedWin = hs.window.focusedWindow()
-        local isFocused  = focusedWin and focusedWin:id() == winId
-        if state == "waiting" and _flashState[winId] and not isFocused then
-            btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
-        elseif state == "busy" then
-            btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
-        elseif isActive then
-            btnColor = cfg.activeButtonColor
-        else
-            btnColor = cfg.buttonColor
-        end
-        local rawTitle = win:title() or ""
-        local parts    = parseTitleComponents(rawTitle)
-        local fullPath = getWindowWorkingDir(win)
-        local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
-
-        -- Button background
+        -- Background
         canvas:appendElements({
             type = "rectangle",
-            frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
-            fillColor = color(btnColor),
+            frame = { x = 0, y = 0, w = sb.w, h = sb.h },
+            fillColor = color(cfg.sidebarColor),
             strokeWidth = 0,
-            roundedRectRadii = { xRadius = 4, yRadius = 4 },
         })
-        self._btnBgElements[winId] = elemIdx
-        elemIdx = elemIdx + 1
 
-        -- ── Line 1: custom rename → hostname → "Window N" fallback ──
-        local label = self._customNames[winId]
-            or parts.host
-            or ("Window " .. i)
+        -- Right border
         canvas:appendElements({
-            type          = "text",
-            frame         = { x = textX, y = y + 5, w = textW, h = 15 },
-            text          = label,
-            textColor     = color(cfg.textColor),
-            textSize      = 11,
-            textAlignment = "left",
+            type = "rectangle",
+            frame = { x = sb.w - 1, y = 0, w = 1, h = sb.h },
+            fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
+            strokeWidth = 0,
         })
-        elemIdx = elemIdx + 1
 
-        -- ── Line 2: PWD basename ──
-        if basename then
-            local base = basename
-            canvas:appendElements({
-                type          = "text",
-                frame         = { x = textX, y = y + 22, w = textW, h = 13 },
-                text          = base,
-                textColor     = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
-                textSize      = 10,
-                textAlignment = "left",
-            })
-            elemIdx = elemIdx + 1
-        end
+        -- Window buttons
+        local itermWins = getITermWindows()
+        local y = 6
+        self._buttonFrames = {}
 
-        -- ── Line 3: git branch ──
-        local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
-        if branch then
-            canvas:appendElements({
-                type          = "text",
-                frame         = { x = textX, y = y + 38, w = textW, h = 13 },
-                text          = "⎇ " .. branch,
-                textColor     = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
-                textSize      = 10,
-                textAlignment = "left",
-            })
-            elemIdx = elemIdx + 1
-        end
-
-        -- ── Line 4: opencode session info ──
-        local ocData
-        if fullPath and self._opencodeData[fullPath] then
-            ocData = self._opencodeData[fullPath]
-        else
-            for _, data in pairs(self._opencodeData or {}) do
-                if data.title and rawTitle:find(data.title, 1, true) then
-                    ocData = data
-                    break
+        -- If we have a saved ordering, reorder itermWins to match
+        if self._orderedWindowIds and #self._orderedWindowIds > 0 then
+            local winMap = {}
+            for _, win in ipairs(itermWins) do
+                winMap[win:id()] = win
+            end
+            local ordered = {}
+            for _, wid in ipairs(self._orderedWindowIds) do
+                if winMap[wid] then
+                    table.insert(ordered, winMap[wid])
+                    winMap[wid] = nil
                 end
             end
-        end
-        if ocData then
-            local modelStr = shortModelName(ocData.modelID) or ""
-            local agentStr = ocData.agent or ""
-            local tokStr = ""
-            if ocData.tokensIn and ocData.tokensIn > 0 then
-                tokStr = fmtTokens(ocData.tokensIn) .. " in"
-                if ocData.tokensOut and ocData.tokensOut > 0 then
-                    tokStr = tokStr .. " · " .. fmtTokens(ocData.tokensOut) .. " out"
+            for _, win in ipairs(itermWins) do
+                if winMap[win:id()] then
+                    table.insert(ordered, win)
                 end
             end
-            local segments = {}
-            if modelStr ~= "" then table.insert(segments, modelStr) end
-            if agentStr ~= "" then table.insert(segments, agentStr) end
-            if tokStr ~= "" then table.insert(segments, tokStr) end
-            local ocText = table.concat(segments, "  ")
-            canvas:appendElements({
-                type          = "text",
-                frame         = { x = textX, y = y + 53, w = textW, h = 12 },
-                text          = ocText,
-                textColor     = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
-                textSize      = 9,
-                textAlignment = "left",
-            })
-            elemIdx = elemIdx + 1
+            itermWins = ordered
         end
 
-        -- ── Line 5: Claude Code session info ──
-        local ccData = fullPath and self._claudeCodeData and self._claudeCodeData[fullPath]
-        if ccData then
-            local modelShort = shortModelName(ccData.model) or ""
-            local tokStr = ""
-            if ccData.tokensIn > 0 then
-                tokStr = fmtTokens(ccData.tokensIn) .. "▲ " .. fmtTokens(ccData.tokensOut) .. "▼"
+        local textW    = sb.w - cfg.padding * 2 - 12
+        local textX    = cfg.padding + 6
+        local elemIdx  = 3
+
+        self._btnBgElements = {}
+
+        for i, win in ipairs(itermWins) do
+            local winId    = win:id()
+            local isActive = (winId == self.activeWindowId)
+            local state    = claudeState(win)
+            local btnColor
+            local focusedWin = hs.window.focusedWindow()
+            local isFocused  = focusedWin and focusedWin:id() == winId
+            if state == "waiting" and _flashState[winId] and not isFocused then
+                btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+            elseif state == "busy" then
+                btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
+            elseif isActive then
+                btnColor = cfg.activeButtonColor
+            else
+                btnColor = cfg.buttonColor
             end
-            local pr = self._ghAvailable and getOpenPRForWindow(win) or nil
-            local prStr = pr and ("#" .. pr.number) or ""
-            local segments = {}
-            if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
-            if tokStr     ~= "" then table.insert(segments, tokStr) end
-            if prStr      ~= "" then table.insert(segments, prStr) end
-            local ccText = table.concat(segments, "  ")
+            local rawTitle = win:title() or ""
+            local parts    = parseTitleComponents(rawTitle)
+            local fullPath = getWindowWorkingDir(win)
+            local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
+
+            -- Button background
+            canvas:appendElements({
+                type = "rectangle",
+                frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
+                fillColor = color(btnColor),
+                strokeWidth = 0,
+                roundedRectRadii = { xRadius = 4, yRadius = 4 },
+            })
+            self._btnBgElements[winId] = elemIdx
+            elemIdx = elemIdx + 1
+
+            -- ── Line 1: custom rename → hostname → "Window N" fallback ──
+            local label = self._customNames[winId]
+                or parts.host
+                or ("Window " .. i)
             canvas:appendElements({
                 type          = "text",
-                frame         = { x = textX, y = y + 68, w = textW, h = 12 },
-                text          = ccText,
-                textColor     = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
-                textSize      = 9,
+                frame         = { x = textX, y = y + 5, w = textW, h = 15 },
+                text          = label,
+                textColor     = color(cfg.textColor),
+                textSize      = 11,
                 textAlignment = "left",
             })
             elemIdx = elemIdx + 1
+
+            -- ── Line 2: PWD basename ──
+            if basename then
+                local base = basename
+                canvas:appendElements({
+                    type          = "text",
+                    frame         = { x = textX, y = y + 22, w = textW, h = 13 },
+                    text          = base,
+                    textColor     = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
+                    textSize      = 10,
+                    textAlignment = "left",
+                })
+                elemIdx = elemIdx + 1
+            end
+
+            -- ── Line 3: git branch ──
+            local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
+            if branch then
+                canvas:appendElements({
+                    type          = "text",
+                    frame         = { x = textX, y = y + 38, w = textW, h = 13 },
+                    text          = "⎇ " .. branch,
+                    textColor     = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
+                    textSize      = 10,
+                    textAlignment = "left",
+                })
+                elemIdx = elemIdx + 1
+            end
+
+            -- ── Line 4: opencode session info ──
+            local ocData
+            if fullPath and self._opencodeData[fullPath] then
+                ocData = self._opencodeData[fullPath]
+            else
+                for _, data in pairs(self._opencodeData or {}) do
+                    if data.title and rawTitle:find(data.title, 1, true) then
+                        ocData = data
+                        break
+                    end
+                end
+            end
+            if ocData then
+                local modelStr = shortModelName(ocData.modelID) or ""
+                local agentStr = ocData.agent or ""
+                local tokStr = ""
+                if ocData.tokensIn and ocData.tokensIn > 0 then
+                    tokStr = fmtTokens(ocData.tokensIn) .. " in"
+                    if ocData.tokensOut and ocData.tokensOut > 0 then
+                        tokStr = tokStr .. " · " .. fmtTokens(ocData.tokensOut) .. " out"
+                    end
+                end
+                local segments = {}
+                if modelStr ~= "" then table.insert(segments, modelStr) end
+                if agentStr ~= "" then table.insert(segments, agentStr) end
+                if tokStr ~= "" then table.insert(segments, tokStr) end
+                local ocText = table.concat(segments, "  ")
+                canvas:appendElements({
+                    type          = "text",
+                    frame         = { x = textX, y = y + 53, w = textW, h = 12 },
+                    text          = ocText,
+                    textColor     = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
+                    textSize      = 9,
+                    textAlignment = "left",
+                })
+                elemIdx = elemIdx + 1
+            end
+
+            -- ── Line 5: Claude Code session info ──
+            local ccData = fullPath and self._claudeCodeData and self._claudeCodeData[fullPath]
+            if ccData then
+                local modelShort = shortModelName(ccData.model) or ""
+                local tokStr = ""
+                if ccData.tokensIn > 0 then
+                    tokStr = fmtTokens(ccData.tokensIn) .. "▲ " .. fmtTokens(ccData.tokensOut) .. "▼"
+                end
+                local pr = self._ghAvailable and getOpenPRForWindow(win) or nil
+                local prStr = pr and ("#" .. pr.number) or ""
+                local segments = {}
+                if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
+                if tokStr     ~= "" then table.insert(segments, tokStr) end
+                if prStr      ~= "" then table.insert(segments, prStr) end
+                local ccText = table.concat(segments, "  ")
+                canvas:appendElements({
+                    type          = "text",
+                    frame         = { x = textX, y = y + 68, w = textW, h = 12 },
+                    text          = ccText,
+                    textColor     = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
+                    textSize      = 9,
+                    textAlignment = "left",
+                })
+                elemIdx = elemIdx + 1
+            end
+
+            self._buttonFrames[i] = {
+                x = cfg.padding, y = y,
+                w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
+                windowId = winId,
+            }
+            y = y + cfg.windowButtonHeight + 4
         end
 
-        self._buttonFrames[i] = {
-            x = cfg.padding, y = y,
-            w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
-            windowId = winId,
-        }
-        y = y + cfg.windowButtonHeight + 4
-    end
+        self.sidebarCanvas = canvas
+        self._pendingSidebarFrame = nil
+        canvas:show()
+    end)
 
-    self.sidebarCanvas = canvas
-    self._pendingSidebarFrame = nil
-    canvas:show()
     self._buildPending = false
+
+    if not ok then
+        hs.printf("buildSidebar crashed: %s", tostring(err))
+    end
 end
 
 -- ─────────────────────────────────────────────
