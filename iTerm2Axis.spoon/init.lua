@@ -1182,8 +1182,8 @@ function obj:bindHotkeys(mapping)
     local moveDownMods, moveDownKey     = table.unpack(map.moveDown     or {{"cmd","shift"}, "]"})
     local moveTopMods, moveTopKey       = table.unpack(map.moveToTop    or {{"cmd","shift"}, "up"})
     local moveBottomMods, moveBottomKey = table.unpack(map.moveToBottom or {{"cmd","shift"}, "down"})
-    local focusUpMods, focusUpKey       = table.unpack(map.focusUp      or {{"ctrl","alt","cmd"}, "up"})
-    local focusDownMods, focusDownKey   = table.unpack(map.focusDown    or {{"ctrl","alt","cmd"}, "down"})
+    local focusUpMods, focusUpKey       = table.unpack(map.focusUp      or {{"alt","cmd"}, "up"})
+    local focusDownMods, focusDownKey   = table.unpack(map.focusDown    or {{"alt","cmd"}, "down"})
 
     hs.hotkey.bind(toggleMods, toggleKey, function()
         if self.sidebarCanvas then
