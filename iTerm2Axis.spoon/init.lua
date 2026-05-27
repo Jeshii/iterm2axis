@@ -1011,6 +1011,35 @@ function obj:moveWindowToExtent(windowId, extent)
     self:buildSidebar()
 end
 
+function obj:focusNextWindow(direction)
+    local wins = getITermWindows()
+    if #wins < 2 then return end
+
+    if not self._orderedWindowIds or #self._orderedWindowIds == 0 then
+        for _, win in ipairs(wins) do
+            table.insert(self._orderedWindowIds, win:id())
+        end
+    end
+
+    local currentIdx
+    if self.activeWindowId then
+        for i, id in ipairs(self._orderedWindowIds) do
+            if id == self.activeWindowId then currentIdx = i; break end
+        end
+    end
+
+    if not currentIdx then
+        self:bringWindowToFront(self._orderedWindowIds[1])
+        return
+    end
+
+    local newIdx = currentIdx + direction
+    if newIdx < 1 then newIdx = #self._orderedWindowIds end
+    if newIdx > #self._orderedWindowIds then newIdx = 1 end
+
+    self:bringWindowToFront(self._orderedWindowIds[newIdx])
+end
+
 -- ─────────────────────────────────────────────
 -- Per-Window UIElement Watcher (for resize events)
 -- ─────────────────────────────────────────────
@@ -1125,7 +1154,8 @@ end
 --- Bind hotkeys for iTerm2Axis.
 ---
 --- Parameters:
----  * mapping - A table with keys: toggle, newWindow, refresh
+---  * mapping - A table with keys: toggle, newWindow, refresh, renameWindow,
+---    moveUp, moveDown, moveToTop, moveToBottom, focusUp, focusDown
 ---    Each value is a table: { modifiers, key }
 function obj:bindHotkeys(mapping)
     local map = mapping or {}
@@ -1138,6 +1168,8 @@ function obj:bindHotkeys(mapping)
     local moveDownMods, moveDownKey     = table.unpack(map.moveDown     or {{"cmd","shift"}, "]"})
     local moveTopMods, moveTopKey       = table.unpack(map.moveToTop    or {{"cmd","shift"}, "up"})
     local moveBottomMods, moveBottomKey = table.unpack(map.moveToBottom or {{"cmd","shift"}, "down"})
+    local focusUpMods, focusUpKey       = table.unpack(map.focusUp      or {{"alt","cmd"}, "up"})
+    local focusDownMods, focusDownKey   = table.unpack(map.focusDown    or {{"alt","cmd"}, "down"})
 
     hs.hotkey.bind(toggleMods, toggleKey, function()
         if self.sidebarCanvas then
@@ -1185,6 +1217,14 @@ function obj:bindHotkeys(mapping)
 
     hs.hotkey.bind(moveBottomMods, moveBottomKey, function()
         if self.activeWindowId then self:moveWindowToExtent(self.activeWindowId, "bottom") end
+    end)
+
+    hs.hotkey.bind(focusUpMods, focusUpKey, function()
+        self:focusNextWindow(-1)
+    end)
+
+    hs.hotkey.bind(focusDownMods, focusDownKey, function()
+        self:focusNextWindow(1)
     end)
 
     hs.hotkey.bind({"cmd","shift","ctrl"}, "D", function()

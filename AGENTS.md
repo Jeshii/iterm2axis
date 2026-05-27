@@ -25,6 +25,8 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 - `⌘⇧]` — Move selected window down in sidebar
 - `⌘⇧↑` — Move selected window to top of sidebar
 - `⌘⇧↓` — Move selected window to bottom of sidebar
+- `⌥⌘↑` — Focus previous iTerm window (cycles)
+- `⌥⌘↓` — Focus next iTerm window (cycles)
 
 ## Important Rules
 
