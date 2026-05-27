@@ -6,6 +6,7 @@ A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floatin
 
 - Floating sidebar showing all open iTerm2 windows with git branch subtitles
 - Click any window button to bring it to the front
+- Keyboard navigation to cycle focus between windows
 - Right-click any window for a context menu: Rename, Reorder, Refresh, Show/Hide Axis, iTerm Settings Tip
 - Auto-refreshes on window open/close/title change and screen layout changes
 
@@ -13,37 +14,58 @@ A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floatin
 
 1. Download or clone this repo.
 2. Copy (or symlink) `iTerm2Axis.spoon` into `~/.hammerspoon/Spoons/`.
-3. Add to your `~/.hammerspoon/init.lua`:
+3. Add the following to your `~/.hammerspoon/init.lua`:
 
 ```lua
 hs.loadSpoon("iTerm2Axis")
-spoon.iTerm2Axis:bindHotkeys({
-    toggle     = {{"cmd", "shift"}, "A"},
-    newWindow  = {{"cmd", "shift"}, "N"},
-    refresh    = {{"cmd", "shift"}, "R"},
-    rename     = {{"cmd", "shift"}, "W"},
-    moveUp     = {{"cmd", "shift"}, "["},
-    moveDown   = {{"cmd", "shift"}, "]"},
-    moveTop    = {{"cmd", "shift"}, "up"},
-    moveBottom = {{"cmd", "shift"}, "down"},
-})
 spoon.iTerm2Axis:start()
+spoon.iTerm2Axis:bindHotkeys({
+    toggle       = {{"cmd", "shift"}, "A"},
+    newWindow    = {{"cmd", "shift"}, "N"},
+    refresh      = {{"cmd", "shift"}, "R"},
+    renameWindow = {{"cmd", "shift"}, "W"},
+    moveUp       = {{"cmd", "shift"}, "["},
+    moveDown     = {{"cmd", "shift"}, "]"},
+    moveToTop    = {{"cmd", "shift"}, "up"},
+    moveToBottom = {{"cmd", "shift"}, "down"},
+    focusUp      = {{"ctrl", "alt", "cmd"}, "up"},
+    focusDown    = {{"ctrl", "alt", "cmd"}, "down"},
+})
 ```
 
-## Default Hotkeys
+> **Important:** `bindHotkeys` must be called explicitly from your `init.lua` — the spoon does not register any hotkeys automatically. If you skip this call, no keyboard shortcuts will work. Call it with `{}` to use all defaults with no customisation:
+> ```lua
+> spoon.iTerm2Axis:bindHotkeys({})
+> ```
 
-| Key | Action |
+4. Reload your Hammerspoon config (`⌘⇧R` in the Hammerspoon menu, or `hs.reload()` in the console).
+
+## Hotkeys
+
+All hotkeys have built-in defaults but **are only registered when you call `bindHotkeys`** in your `init.lua`. You can override any combo by passing your preferred modifiers and key, or omit any entry to accept the default.
+
+| Key (default) | Mapping name | Action |
 |---|---|---|
-| ⌘⇧A | Show / hide the Axis sidebar |
-| ⌘⇧N | Open a new iTerm2 window |
-| ⌘⇧R | Force-refresh the layout |
-| ⌘⇧W | Rename selected window |
-| ⌘⇧[ | Move selected window up the sidebar |
-| ⌘⇧] | Move selected window down the sidebar |
-| ⌘⇧↑ | Move selected window to top of sidebar |
-| ⌘⇧↓ | Move selected window to bottom of sidebar |
+| ⌘⇧A | `toggle` | Show / hide the Axis sidebar |
+| ⌘⇧N | `newWindow` | Open a new iTerm2 window |
+| ⌘⇧R | `refresh` | Force-refresh the layout |
+| ⌘⇧W | `renameWindow` | Rename the active window |
+| ⌘⇧[ | `moveUp` | Move active window up the sidebar |
+| ⌘⇧] | `moveDown` | Move active window down the sidebar |
+| ⌘⇧↑ | `moveToTop` | Move active window to top of sidebar |
+| ⌘⇧↓ | `moveToBottom` | Move active window to bottom of sidebar |
+| ⌃⌥⌘↑ | `focusUp` | Focus the previous window in the sidebar |
+| ⌃⌥⌘↓ | `focusDown` | Focus the next window in the sidebar |
 
-You can override any of these via `bindHotkeys` (see above).
+To override a combo, pass your preferred value in the `bindHotkeys` call:
+
+```lua
+spoon.iTerm2Axis:bindHotkeys({
+    focusUp   = {{"alt", "cmd"}, "up"},   -- override
+    focusDown = {{"alt", "cmd"}, "down"}, -- override
+    -- all other keys will use their defaults
+})
+```
 
 ## Configuration
 
@@ -53,3 +75,13 @@ Customise `spoon.iTerm2Axis.config` before calling `:start()`:
 spoon.iTerm2Axis.config.sidebarWidth = 200
 spoon.iTerm2Axis.config.activeButtonColor = {red=0.8, green=0.3, blue=0.1, alpha=1}
 ```
+
+## iTerm2 Key Binding Conflicts
+
+Some key combos (e.g. `⌥⌘↑`) may be intercepted by iTerm2 before Hammerspoon sees them, producing escape sequences in the terminal instead of switching windows. If this happens:
+
+1. Open **iTerm2 → Settings → Keys → Key Bindings**
+2. Look for any binding that matches your chosen combo
+3. Delete or reassign it
+
+The default `⌃⌥⌘↑` / `⌃⌥⌘↓` combos are chosen specifically to avoid iTerm2's built-in bindings.
