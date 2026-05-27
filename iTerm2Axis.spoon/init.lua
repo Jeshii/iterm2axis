@@ -549,6 +549,8 @@ end
 -- ─────────────────────────────────────────────
 
 function obj:buildSidebar()
+    if self._buildPending then return end
+    self._buildPending = true
     if self.sidebarCanvas then
         if not self._pendingSidebarFrame then
             self._pendingSidebarFrame = self.sidebarCanvas:frame()
@@ -763,6 +765,7 @@ function obj:buildSidebar()
     self.sidebarCanvas = canvas
     self._pendingSidebarFrame = nil
     canvas:show()
+    self._buildPending = false
 end
 
 -- ─────────────────────────────────────────────
@@ -1015,11 +1018,22 @@ function obj:focusNextWindow(direction)
     local wins = getITermWindows()
     if #wins < 2 then return end
 
-    if not self._orderedWindowIds or #self._orderedWindowIds == 0 then
+    if not self._orderedWindowIds then self._orderedWindowIds = {} end
+    if #self._orderedWindowIds == 0 then
         for _, win in ipairs(wins) do
             table.insert(self._orderedWindowIds, win:id())
         end
+    else
+        local liveIds = {}
+        for _, win in ipairs(wins) do liveIds[win:id()] = true end
+        local filtered = {}
+        for _, id in ipairs(self._orderedWindowIds) do
+            if liveIds[id] then table.insert(filtered, id) end
+        end
+        self._orderedWindowIds = filtered
     end
+
+    if #self._orderedWindowIds == 0 then return end
 
     local currentIdx
     if self.activeWindowId then
@@ -1168,8 +1182,8 @@ function obj:bindHotkeys(mapping)
     local moveDownMods, moveDownKey     = table.unpack(map.moveDown     or {{"cmd","shift"}, "]"})
     local moveTopMods, moveTopKey       = table.unpack(map.moveToTop    or {{"cmd","shift"}, "up"})
     local moveBottomMods, moveBottomKey = table.unpack(map.moveToBottom or {{"cmd","shift"}, "down"})
-    local focusUpMods, focusUpKey       = table.unpack(map.focusUp      or {{"alt","cmd"}, "up"})
-    local focusDownMods, focusDownKey   = table.unpack(map.focusDown    or {{"alt","cmd"}, "down"})
+    local focusUpMods, focusUpKey       = table.unpack(map.focusUp      or {{"ctrl","alt","cmd"}, "up"})
+    local focusDownMods, focusDownKey   = table.unpack(map.focusDown    or {{"ctrl","alt","cmd"}, "down"})
 
     hs.hotkey.bind(toggleMods, toggleKey, function()
         if self.sidebarCanvas then
@@ -1316,10 +1330,11 @@ function obj:start()
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowTitleChanged", function(win)
+        local isCCStateChange
         if win then
             local id = win:id()
             local title = win:title() or ""
-            local isCCStateChange = title:match("^✳") or title:match("^·")
+            isCCStateChange = title:match("^✳") or title:match("^·")
             if not isCCStateChange then
                 _wdCache[id] = nil
                 _gitBranchCache[id] = nil
@@ -1346,6 +1361,7 @@ function obj:start()
             self._mouseTap:start()
         end
         if win and isITerm(win) then
+            self.activeWindowId = win:id()
             stopFlashing(win:id())
         end
         if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
