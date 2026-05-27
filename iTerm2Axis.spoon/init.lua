@@ -78,9 +78,11 @@ end
 
 local function isITerm(win)
     if not win then return false end
-    local app = win:application()
-    if not app then return false end
-    return app:bundleID() == "com.googlecode.iterm2"
+    local ok, app = pcall(function() return win:application() end)
+    if not ok or not app then return false end
+    local ok2, bid = pcall(function() return app:bundleID() end)
+    if not ok2 or not bid then return false end
+    return bid == "com.googlecode.iterm2"
 end
 
 local function getITermWindows()
