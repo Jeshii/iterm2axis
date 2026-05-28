@@ -15,8 +15,9 @@ obj.author   = "Jesse Fuller"
 obj.license  = "MIT - https://opensource.org/licenses/MIT"
 obj.homepage = "https://github.com/Jeshii/iterm2axis"
 
-local SETTINGS_KEY_ORDER = "iTerm2Axis.orderedWindowIds"
-local SETTINGS_KEY_NAMES = "iTerm2Axis.customNames"
+local SETTINGS_KEY_ORDER          = "iTerm2Axis.orderedWindowIds"
+local SETTINGS_KEY_NAMES          = "iTerm2Axis.customNames"
+local SETTINGS_KEY_NAMES_BY_PATH  = "iTerm2Axis.customNamesByPath"
 
 obj.config = {
     debug             = false,
@@ -185,6 +186,13 @@ local function getWindowWorkingDir(win)
         _wdFlight[winId] = nil
         local path = stdout and stdout:gsub("%s+$", "")
         _wdCache[winId] = (path and path ~= "") and path or false
+        if _wdCache[winId] and obj._customNamesByPath then
+            local resolvedPath = _wdCache[winId]
+            if resolvedPath and obj._customNamesByPath[resolvedPath]
+            and not obj._customNames[winId] then
+                obj._customNames[winId] = obj._customNamesByPath[resolvedPath]
+            end
+        end
         if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
             obj:buildSidebar()
         end
@@ -1091,10 +1099,20 @@ function obj:renameWindow(windowId)
     if button == "Rename" and input and input ~= "" then
         self._customNames[windowId] = input
         hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
+        local fullPath = _wdCache[windowId]
+        if fullPath then
+            self._customNamesByPath[fullPath] = input
+            hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
+        end
         self:buildSidebar()
     elseif button == "Rename" and (not input or input == "") then
         self._customNames[windowId] = nil
         hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
+        local fullPath = _wdCache[windowId]
+        if fullPath then
+            self._customNamesByPath[fullPath] = nil
+            hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
+        end
         self:buildSidebar()
     end
 end
@@ -1650,6 +1668,48 @@ function obj:start()
         getWindowWorkingDir(win)
     end
 
+    -- Restore persisted order and names
+    local savedOrder = hs.settings.get(SETTINGS_KEY_ORDER)
+    local savedNames = hs.settings.get(SETTINGS_KEY_NAMES)
+
+    if savedOrder then
+        local liveWins = getITermWindows()
+        local liveIds  = {}
+        for _, w in ipairs(liveWins) do liveIds[w:id()] = true end
+        local filtered = {}
+        for _, id in ipairs(savedOrder) do
+            local numId = tonumber(id)
+            if numId and liveIds[numId] then table.insert(filtered, numId) end
+        end
+        self._orderedWindowIds = filtered
+    end
+
+    if savedNames then
+        local liveWins = getITermWindows()
+        local liveIds  = {}
+        for _, w in ipairs(liveWins) do liveIds[w:id()] = true end
+        local filtered = {}
+        for id, name in pairs(savedNames) do
+            local numId = tonumber(id)
+            if numId and liveIds[numId] then filtered[numId] = name end
+        end
+        self._customNames = filtered
+    end
+
+    -- Apply path-keyed custom names for any window whose WD is already known
+    local savedNamesByPath = hs.settings.get(SETTINGS_KEY_NAMES_BY_PATH)
+    if savedNamesByPath then
+        self._customNamesByPath = savedNamesByPath
+        local liveWins = getITermWindows()
+        for _, w in ipairs(liveWins) do
+            local id = w:id()
+            local path = _wdCache[id]
+            if path and savedNamesByPath[path] and not self._customNames[id] then
+                self._customNames[id] = savedNamesByPath[path]
+            end
+        end
+    end
+
     if self._screenWatcher then self._screenWatcher:stop() end
     self._screenWatcher = hs.screen.watcher.new(function()
         hs.timer.doAfter(0.3, function()
@@ -1665,32 +1725,6 @@ function obj:start()
         end)
     end)
     self._screenWatcher:start()
-
-    -- Restore persisted order and names
-    local savedOrder = hs.settings.get(SETTINGS_KEY_ORDER)
-    local savedNames = hs.settings.get(SETTINGS_KEY_NAMES)
-
-    if savedOrder then
-        local liveWins = getITermWindows()
-        local liveIds  = {}
-        for _, w in ipairs(liveWins) do liveIds[w:id()] = true end
-        local filtered = {}
-        for _, id in ipairs(savedOrder) do
-            if liveIds[id] then table.insert(filtered, id) end
-        end
-        self._orderedWindowIds = filtered
-    end
-
-    if savedNames then
-        local liveWins = getITermWindows()
-        local liveIds  = {}
-        for _, w in ipairs(liveWins) do liveIds[w:id()] = true end
-        local filtered = {}
-        for id, name in pairs(savedNames) do
-            if liveIds[id] then filtered[id] = name end
-        end
-        self._customNames = filtered
-    end
 
     self:buildSidebar()
     self:tileITermWindows()
@@ -1710,8 +1744,15 @@ function obj:start()
 end
 
 function obj:stop()
-    hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
-    hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
+    if self._orderedWindowIds and next(self._orderedWindowIds) then
+        hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
+    end
+    if self._customNames and next(self._customNames) then
+        hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
+    end
+    if self._customNamesByPath and next(self._customNamesByPath) then
+        hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
+    end
     if self._mouseTap      then self._mouseTap:stop();      self._mouseTap      = nil end
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
@@ -1761,6 +1802,7 @@ function obj:init()
     self._tipKey         = nil
     self._windowWatchers   = {}
     self._customNames      = {}
+    self._customNamesByPath = {}
     self._orderedWindowIds = {}
     self._opencodeData     = {}
     self._opencodePending  = false
