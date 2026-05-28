@@ -143,13 +143,15 @@ local function parseTitleComponents(title)
     if h and p then
         host = h
         pathPart = p
-    elseif not h then
-        -- Hostname only (no path suffix) -- e.g. "user@prod-host"
-        h = title:match("^[^@]+@([^:%s]+)%s*$")
-        if h then host = h end
     else
-        -- Try bare path (no host prefix)
-        pathPart = title:match("^(~?/[^%s].*)$") or title:match("%s(~?/[^%s]+)%s*$")
+        -- SSH without path: "user@host"
+        local h2 = title:match("^[^@]+@([^:%s]+)%s*$")
+        if h2 then
+            host = h2
+        else
+            -- Bare path (no host prefix)
+            pathPart = title:match("^(~?/[^%s].*)$") or title:match("%s(~?/[^%s]+)%s*$")
+        end
     end
 
     local fullPath = pathPart and pathPart:gsub("^~", home):gsub("%s+$", "")
