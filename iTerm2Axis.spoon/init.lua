@@ -238,14 +238,14 @@ end
 
 local function startFlashing(winId)
     if _flashingWindows[winId] then return end
-    _flashingWindows[winId] = true
     _flashState[winId] = true
     local isActive = (winId == obj.activeWindowId)
     _flashNormalColor[winId] = isActive and obj.config.activeButtonColor or obj.config.buttonColor
+    _flashingWindows[winId] = true
 
     if not _sharedFlashTimer then
         _sharedFlashTimer = hs.timer.new(obj.config.claudecode.flashInterval, function()
-            for wid, _ in pairs(_flashingWindows) do
+            for wid in pairs(_flashingWindows) do
                 _flashState[wid] = not _flashState[wid]
                 local bgIdx = obj._btnBgElements[wid]
                 if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
@@ -262,18 +262,22 @@ end
 
 local function stopFlashing(winId)
     _flashingWindows[winId] = nil
-    if not next(_flashingWindows) and _sharedFlashTimer then
-        _sharedFlashTimer:stop()
-        _sharedFlashTimer = nil
-    end
     _flashState[winId] = nil
     local normalColor = _flashNormalColor[winId]
     _flashNormalColor[winId] = nil
+
+    -- Restore button color immediately
     if normalColor and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
         local bgIdx = obj._btnBgElements[winId]
         if bgIdx then
             obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(normalColor))
         end
+    end
+
+    -- Stop shared timer if no windows remain
+    if not next(_flashingWindows) and _sharedFlashTimer then
+        _sharedFlashTimer:stop()
+        _sharedFlashTimer = nil
     end
 end
 
