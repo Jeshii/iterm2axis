@@ -1003,6 +1003,7 @@ function obj:_doBuildSidebar()
             self._pendingSidebarFrame = nil
             if needsFullRebuild then
                 self.sidebarCanvas:show()
+                self.sidebarCanvas:raise()
             end
         else
             -- ── In-place update path: elementAttribute calls only ──
@@ -1075,10 +1076,6 @@ function obj:_doBuildSidebar()
             self._pendingSidebarFrame = nil
         end
     end)
-
-    if self.sidebarCanvas then
-        self.sidebarCanvas:raise()
-    end
 
     self._buildPending = false
 
