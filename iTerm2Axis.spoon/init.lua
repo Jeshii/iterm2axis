@@ -999,6 +999,8 @@ function obj:_doBuildSidebar()
                     end
                 end
 
+                self._btnStructureKeys[winId] = wd.bKey
+
                 self._buttonFrames[i] = {
                     x = cfg.padding, y = y,
                     w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
