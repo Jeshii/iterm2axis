@@ -16,6 +16,7 @@ obj.license  = "MIT - https://opensource.org/licenses/MIT"
 obj.homepage = "https://github.com/Jeshii/iterm2axis"
 
 obj.config = {
+    debug             = false,
     sidebarWidth      = 200,
     sidebarColor      = { red = 0.12, green = 0.12, blue = 0.14, alpha = 0.95 },
     buttonColor       = { red = 0.2,  green = 0.2,  blue = 0.22, alpha = 1 },
@@ -772,7 +773,7 @@ function obj:_doBuildSidebar()
                 strokeWidth = 0,
                 roundedRectRadii = { xRadius = 4, yRadius = 4 },
             })
-            self._btnBgElements[winId] = elemIdx
+            local map = { bg = elemIdx }
             elemIdx = elemIdx + 1
 
             -- ── Line 1: custom rename → hostname → "Window N" fallback ──
@@ -787,6 +788,7 @@ function obj:_doBuildSidebar()
                 textSize      = 11,
                 textAlignment = "left",
             })
+            map.line1 = elemIdx
             elemIdx = elemIdx + 1
 
             -- ── Line 2: PWD basename ──
@@ -800,6 +802,7 @@ function obj:_doBuildSidebar()
                     textSize      = 10,
                     textAlignment = "left",
                 })
+                map.line2 = elemIdx
                 elemIdx = elemIdx + 1
             end
 
@@ -814,6 +817,7 @@ function obj:_doBuildSidebar()
                     textSize      = 10,
                     textAlignment = "left",
                 })
+                map.line3 = elemIdx
                 elemIdx = elemIdx + 1
             end
 
@@ -852,6 +856,7 @@ function obj:_doBuildSidebar()
                     textSize      = 9,
                     textAlignment = "left",
                 })
+                map.line4 = elemIdx
                 elemIdx = elemIdx + 1
             end
 
@@ -878,7 +883,20 @@ function obj:_doBuildSidebar()
                     textSize      = 9,
                     textAlignment = "left",
                 })
+                map.line5 = elemIdx
                 elemIdx = elemIdx + 1
+            end
+
+            if needsFullRebuild then
+                self._elementMap[winId] = map
+            end
+            self._btnBgElements[winId] = map.bg
+
+            if self.config.debug then
+                hs.printf("elementMap[%d]: bg=%s l1=%s l2=%s l3=%s l4=%s l5=%s",
+                    winId,
+                    tostring(map.bg), tostring(map.line1), tostring(map.line2),
+                    tostring(map.line3), tostring(map.line4), tostring(map.line5))
             end
 
             self._buttonFrames[i] = {
@@ -1573,6 +1591,7 @@ function obj:stop()
      self._opencodePending = false
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
+    self._elementMap          = {}
     self._lastSidebarSnapshot = nil
     self._lastStructureSnapshot = nil
     return self
@@ -1602,6 +1621,7 @@ function obj:init()
     self._claudeCodePollTimer = nil
     self._ghAvailable         = false
     self._btnBgElements       = {}
+    self._elementMap          = {}
     self._lastSidebarSnapshot = nil
     self._lastStructureSnapshot = nil
      _gitBranchCache   = {}
