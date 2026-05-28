@@ -221,6 +221,12 @@ local _flashTimers      = {}
 local _flashState       = {}
 local _flashNormalColor = {}
 
+-- Per-window Claude Code data cache, keyed by windowId.
+-- Uses hs.task for async .jsonl reads so buildSidebar never blocks.
+local _ccCache   = {}  -- [winId] = { model, tokensIn, tokensOut } or false
+local _ccPending = {}  -- [winId] = true (fetch in flight)
+local _ccPathKey = {}  -- [winId] = fullPath last fetched (invalidation key)
+
 local function claudeState(win)
     local title = win:title() or ""
     if title:match("^✳") then return "waiting" end
@@ -422,28 +428,42 @@ function obj:startOpenCodePolling()
     self._opencodePollTimer:start()
 end
 
-function obj:fetchClaudeCodeData()
-    local newData = {}
+local function fetchClaudeCodeForWindow(win, fullPath, callback)
+    local winId = win:id()
 
-    local wins = getITermWindows()
-    for _, win in ipairs(wins) do
-        local fullPath = getWindowWorkingDir(win)
-        if not fullPath then goto continue end
+    -- Already have fresh data for this path
+    if _ccPathKey[winId] == fullPath and _ccCache[winId] ~= nil then
+        if callback then callback() end
+        return
+    end
 
-        local projectDir = claudeProjectDir(fullPath)
-        local latestFile = hs.execute(
-            "ls -t '" .. projectDir .. "'/*.jsonl 2>/dev/null | head -1"
-        ):gsub("%s+$", "")
+    -- Fetch already in flight
+    if _ccPending[winId] then
+        if callback then callback() end
+        return
+    end
+    _ccPending[winId] = true
 
-        if latestFile == "" then goto continue end
+    local projectDir = claudeProjectDir(fullPath)
 
-        local content = hs.execute("tail -50 '" .. latestFile .. "' 2>/dev/null")
-        local model, tokensIn, tokensOut = nil, 0, 0
+    -- Step 1: find the latest .jsonl file (async)
+    hs.task.new("/bin/sh", function(_, latestFile, _)
+        latestFile = latestFile and latestFile:gsub("%s+$", "") or ""
+        if latestFile == "" then
+            _ccPending[winId] = nil
+            _ccCache[winId]   = false
+            _ccPathKey[winId] = fullPath
+            if callback then callback() end
+            return
+        end
 
-        for line in content:gmatch("[^\n]+") do
-            local ok, msg = pcall(hs.json.decode, line)
-            if ok and type(msg) == "table" then
-                if msg.type == "assistant" and msg.message then
+        -- Step 2: tail the file (async, chained)
+        hs.task.new("/bin/sh", function(_, content, _)
+            _ccPending[winId] = nil
+            local model, tokensIn, tokensOut = nil, 0, 0
+            for line in (content or ""):gmatch("[^\n]+") do
+                local ok, msg = pcall(hs.json.decode, line)
+                if ok and type(msg) == "table" and msg.type == "assistant" and msg.message then
                     if msg.message.model then
                         model = msg.message.model
                     end
@@ -454,33 +474,54 @@ function obj:fetchClaudeCodeData()
                     end
                 end
             end
-        end
+            _ccCache[winId]   = (model or tokensIn > 0)
+                and { model = model, tokensIn = tokensIn, tokensOut = tokensOut }
+                or false
+            _ccPathKey[winId] = fullPath
+            if callback then callback() end
+        end, {"-c", "tail -50 '" .. latestFile .. "' 2>/dev/null"}):start()
 
-        if model or tokensIn > 0 then
-            newData[fullPath] = {
-                model     = model,
-                tokensIn  = tokensIn,
-                tokensOut = tokensOut,
-            }
-        end
+    end, {"-c", "ls -t '" .. projectDir .. "'/*.jsonl 2>/dev/null | head -1"}):start()
+end
 
-        ::continue::
+function obj:fetchClaudeCodeData()
+    local wins = getITermWindows()
+    if #wins == 0 then return end
+
+    local pending = #wins
+    local function oneDone()
+        pending = pending - 1
+        if pending == 0 then
+            local newData = {}
+            for _, win in ipairs(wins) do
+                local id = win:id()
+                local fp = _wdCache[id]
+                if fp and _ccCache[id] then
+                    newData[fp] = _ccCache[id]
+                end
+            end
+            self._claudeCodeData = newData
+            if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+                self:buildSidebar()
+            end
+        end
     end
 
-    self._claudeCodeData = newData
+    for _, win in ipairs(wins) do
+        local fullPath = _wdCache[win:id()]
+        if fullPath then
+            fetchClaudeCodeForWindow(win, fullPath, oneDone)
+        else
+            oneDone()
+        end
+    end
 end
 
 function obj:startClaudeCodePolling()
     self:fetchClaudeCodeData()
-    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-        self:buildSidebar()
-    end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop() end
     self._claudeCodePollTimer = hs.timer.new(self.config.claudecode.pollInterval, function()
         self:fetchClaudeCodeData()
-        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-            self:buildSidebar()
-        end
     end)
     self._claudeCodePollTimer:start()
 end
@@ -1366,6 +1407,9 @@ function obj:start()
             _prPending[id]       = nil
             _wdCache[id]         = nil
             _wdFlight[id]        = nil
+            _ccCache[id]   = nil
+            _ccPending[id] = nil
+            _ccPathKey[id] = nil
             stopFlashing(id)
         end
         hs.timer.doAfter(0.3, function() self:buildSidebar() end)
@@ -1462,6 +1506,9 @@ function obj:stop()
      _flashTimers = {}
      _flashState  = {}
      _flashNormalColor = {}
+     _ccCache   = {}
+     _ccPending = {}
+     _ccPathKey = {}
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     self._lastSidebarSnapshot = nil
@@ -1501,6 +1548,9 @@ function obj:init()
      _flashTimers      = {}
      _flashState       = {}
      _flashNormalColor = {}
+     _ccCache   = {}
+     _ccPending = {}
+     _ccPathKey = {}
      return self
 end
 
