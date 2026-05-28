@@ -15,7 +15,12 @@ obj.author   = "Jesse Fuller"
 obj.license  = "MIT - https://opensource.org/licenses/MIT"
 obj.homepage = "https://github.com/Jeshii/iterm2axis"
 
+local SETTINGS_KEY_ORDER          = "iTerm2Axis.orderedWindowIds"
+local SETTINGS_KEY_NAMES          = "iTerm2Axis.customNames"
+local SETTINGS_KEY_NAMES_BY_PATH  = "iTerm2Axis.customNamesByPath"
+
 obj.config = {
+    debug             = false,
     sidebarWidth      = 200,
     sidebarColor      = { red = 0.12, green = 0.12, blue = 0.14, alpha = 0.95 },
     buttonColor       = { red = 0.2,  green = 0.2,  blue = 0.22, alpha = 1 },
@@ -36,6 +41,12 @@ obj.config = {
         pollInterval  = 5,
         flashInterval = 2.0,
         projectsDir   = os.getenv("HOME") .. "/.claude/projects",
+    },
+
+    bell = {
+        enabled       = true,
+        flashInterval = 2.0,
+        flashColor    = { red = 0.95, green = 0.85, blue = 0.4, alpha = 0.85 },
     },
 }
 
@@ -58,8 +69,18 @@ function obj:debugTitles()
         -- Check Claude Code dir
         if parts.fullPath then
             local ccDir = claudeProjectDir(parts.fullPath)
-            local ls = hs.execute("ls '" .. ccDir .. "' 2>&1 | head -3")
-            hs.printf("  claudeDir=%s => %s", ccDir, ls:gsub("\n", " | "))
+            local files = {}
+            local ok, iter, dirObj = pcall(hs.fs.dir, ccDir)
+            if ok then
+                for _ = 1, 3 do
+                    local f = iter(dirObj)
+                    if not f then break end
+                    table.insert(files, f)
+                end
+                iter(dirObj)
+            end
+            local display = #files > 0 and table.concat(files, ", ") or "(empty)"
+            hs.printf("  claudeDir=%s => %s", ccDir, display)
         end
         -- Check opencode match
         if obj._opencodeData then
@@ -78,9 +99,11 @@ end
 
 local function isITerm(win)
     if not win then return false end
-    local app = win:application()
-    if not app then return false end
-    return app:bundleID() == "com.googlecode.iterm2"
+    local ok, app = pcall(function() return win:application() end)
+    if not ok or not app then return false end
+    local ok2, bid = pcall(function() return app:bundleID() end)
+    if not ok2 or not bid then return false end
+    return bid == "com.googlecode.iterm2"
 end
 
 local function getITermWindows()
@@ -121,8 +144,14 @@ local function parseTitleComponents(title)
         host = h
         pathPart = p
     else
-        -- Try bare path (no host prefix)
-        pathPart = title:match("^(~?/[^%s].*)$") or title:match("%s(~?/[^%s]+)%s*$")
+        -- SSH without path: "user@host"
+        local h2 = title:match("^[^@]+@([^:%s]+)%s*$")
+        if h2 then
+            host = h2
+        else
+            -- Bare path (no host prefix)
+            pathPart = title:match("^(~?/[^%s].*)$") or title:match("%s(~?/[^%s]+)%s*$")
+        end
     end
 
     local fullPath = pathPart and pathPart:gsub("^~", home):gsub("%s+$", "")
@@ -179,6 +208,21 @@ local function getWindowWorkingDir(win)
         _wdFlight[winId] = nil
         local path = stdout and stdout:gsub("%s+$", "")
         _wdCache[winId] = (path and path ~= "") and path or false
+        if _wdCache[winId] and obj._customNamesByPath then
+            local resolvedPath = _wdCache[winId]
+            if resolvedPath then
+                if obj._customNamesByPath[resolvedPath]
+                and not obj._customNames[winId] then
+                    obj._customNames[winId] = obj._customNamesByPath[resolvedPath]
+                end
+                if obj._pendingPathNames and obj._pendingPathNames[winId] ~= nil then
+                    local pending = obj._pendingPathNames[winId]
+                    obj._customNamesByPath[resolvedPath] = pending or nil  -- false sentinel → nil (clear)
+                    hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, obj._customNamesByPath)
+                    obj._pendingPathNames[winId] = nil
+                end
+            end
+        end
         if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
             obj:buildSidebar()
         end
@@ -198,11 +242,22 @@ local function getGitBranchForPath(path, winId)
     _gitBranchPending[winId] = true
 
     hs.task.new("/usr/bin/git", function(_, stdout, _)
-        _gitBranchPending[winId] = nil
         local branch = stdout and stdout:gsub("%s+$", "")
         if not branch or branch == "" or branch == "HEAD" then
-            branch = hs.execute("git -C '" .. path .. "' worktree list --porcelain 2>/dev/null | grep 'branch' | head -1 | sed 's/branch refs\\/heads\\///'"):gsub("%s+$", "")
+            -- Chained fallback for detached HEAD / worktree (async, non-blocking)
+            hs.task.new("/bin/sh", function(_, out, _)
+                _gitBranchPending[winId] = nil
+                local b = out and out:gsub("%s+$", "")
+                _gitBranchCache[winId] = (b and b ~= "") and b or false
+                hs.timer.doAfter(0, function()
+                    if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+                        obj:buildSidebar()
+                    end
+                end)
+            end, {"-c", "git -C '" .. path .. "' worktree list --porcelain 2>/dev/null | grep 'branch' | head -1 | sed 's/branch refs\\/heads\\///'"}):start()
+            return
         end
+        _gitBranchPending[winId] = nil
         _gitBranchCache[winId] = (branch and branch ~= "") and branch or false
         hs.timer.doAfter(0, function()
             if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
@@ -215,48 +270,77 @@ local function getGitBranchForPath(path, winId)
 end
 
 -- Per-window Claude Code flash state for ✳ waiting indicator.
-local _flashTimers      = {}
+local _sharedFlashTimer  = nil   -- single hs.timer instance
+local _flashingWindows   = {}    -- { [winId] = true } set of active windows
 local _flashState       = {}
 local _flashNormalColor = {}
+local _flashType        = {}
+
+-- Per-window Claude Code data cache, keyed by windowId.
+-- Uses hs.task for async .jsonl reads so buildSidebar never blocks.
+local _ccCache   = {}  -- [winId] = { model, tokensIn, tokensOut } or false
+local _ccPending = {}  -- [winId] = true (fetch in flight)
+local _ccPathKey = {}  -- [winId] = fullPath last fetched (invalidation key)
 
 local function claudeState(win)
     local title = win:title() or ""
-    if title:match("^✳") then return "waiting" end
-    if title:match("^·")  then return "busy"    end
+    local stripped = title:gsub("^🔔", "")
+    if stripped:match("^✳") then return "waiting" end
+    if stripped:match("^·")  then return "busy"    end
+    if title:match("^🔔") then return "bell" end
     return nil
 end
 
-local function startFlashing(winId)
-    if _flashTimers[winId] then return end
+local function startFlashing(winId, flashType)
+    if _flashingWindows[winId] then return end
+    flashType = flashType or "waiting"
+    _flashType[winId] = flashType
     _flashState[winId] = true
     local isActive = (winId == obj.activeWindowId)
     _flashNormalColor[winId] = isActive and obj.config.activeButtonColor or obj.config.buttonColor
-    _flashTimers[winId] = hs.timer.new(obj.config.claudecode.flashInterval, function()
-        _flashState[winId] = not _flashState[winId]
-        local bgIdx = obj._btnBgElements[winId]
-        if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
-            local newColor = _flashState[winId]
-                and { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
-                or _flashNormalColor[winId]
-            obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
-        end
-    end)
-    _flashTimers[winId]:start()
+    _flashingWindows[winId] = true
+
+    if not _sharedFlashTimer then
+        local interval = (flashType == "bell") and obj.config.bell.flashInterval or obj.config.claudecode.flashInterval
+        _sharedFlashTimer = hs.timer.new(interval, function()
+            for wid in pairs(_flashingWindows) do
+                _flashState[wid] = not _flashState[wid]
+                local bgIdx = obj._btnBgElements[wid]
+                if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+                    local normalCol = _flashNormalColor[wid]
+                    local flashColor = (_flashType[wid] == "bell")
+                        and obj.config.bell.flashColor
+                        or { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+                    local newColor = _flashState[wid]
+                        and flashColor
+                        or (normalCol and color(normalCol) or color(obj.config.buttonColor))
+                    obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
+                end
+            end
+        end)
+        _sharedFlashTimer:start()
+    end
 end
 
 local function stopFlashing(winId)
-    if _flashTimers[winId] then
-        _flashTimers[winId]:stop()
-        _flashTimers[winId] = nil
-    end
+    _flashingWindows[winId] = nil
     _flashState[winId] = nil
+    _flashType[winId] = nil
     local normalColor = _flashNormalColor[winId]
     _flashNormalColor[winId] = nil
+
+    -- Restore button color immediately
     if normalColor and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
         local bgIdx = obj._btnBgElements[winId]
         if bgIdx then
             obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(normalColor))
         end
+    end
+
+    -- Stop shared timer if no windows remain
+    if not next(_flashingWindows) and _sharedFlashTimer then
+        _sharedFlashTimer:stop()
+        _sharedFlashTimer = nil
     end
 end
 
@@ -327,121 +411,147 @@ local function getOpenPRForWindow(win)
     return _prCache[winId] or nil
 end
 
+function obj:_finalizeOpenCodeData(newData)
+    self._opencodeData = newData
+    self._opencodePending = false
+    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+        self:buildSidebar()
+    end
+end
+
 function obj:fetchOpenCodeData()
-    local newData = {}
-    local loaded = false
+    if self._opencodePending then return end
+    self._opencodePending = true
 
     -- Try HTTP API first (opencode serve)
-    local okHttp, httpResult = pcall(hs.execute, "/usr/bin/curl -s -m 2 http://127.0.0.1:" .. self.config.opencode.port .. "/session 2>/dev/null")
-    if okHttp and httpResult and httpResult ~= "" then
-        local ok, sessions = pcall(hs.json.decode, httpResult)
-        if ok and type(sessions) == "table" then
-            for _, s in ipairs(sessions) do
-                if s.directory then
-                    local existing = newData[s.directory]
-                    if not existing or (s.time_updated or 0) > existing.updated then
-                        local m = {}
-                        if s.model then
-                            local ok2, parsed = pcall(hs.json.decode, s.model)
-                            if ok2 and type(parsed) == "table" then m = parsed end
+    local curlOk = pcall(function()
+        hs.task.new("/usr/bin/curl", function(_, stdout, _)
+            local newData = {}
+            local hadResponse = stdout and stdout ~= ""
+
+            if hadResponse then
+                local ok, sessions = pcall(hs.json.decode, stdout)
+                if ok and type(sessions) == "table" then
+                    for _, s in ipairs(sessions) do
+                        if s.directory then
+                            local existing = newData[s.directory]
+                            if not existing or (s.time_updated or 0) > existing.updated then
+                                local m = {}
+                                if s.model then
+                                    local ok2, parsed = pcall(hs.json.decode, s.model)
+                                    if ok2 and type(parsed) == "table" then m = parsed end
+                                end
+                                newData[s.directory] = {
+                                    title    = s.title,
+                                    modelID  = m.id,
+                                    provider = m.providerID,
+                                    agent    = s.agent,
+                                    tokensIn = s.tokens_input or 0,
+                                    tokensOut = s.tokens_output or 0,
+                                    updated  = s.time_updated or 0,
+                                }
+                            end
                         end
-                        newData[s.directory] = {
-                            title    = s.title,
-                            modelID  = m.id,
-                            provider = m.providerID,
-                            agent    = s.agent,
-                            tokensIn = s.tokens_input or 0,
-                            tokensOut = s.tokens_output or 0,
-                            updated  = s.time_updated or 0,
-                        }
                     end
                 end
             end
-            loaded = true
-        end
-    end
 
-    -- Fall back to SQLite database
-    if not loaded then
-        local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
-        local sql = "SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
-        local cmd = "/usr/bin/sqlite3 -json '" .. dbPath .. "' \"" .. sql .. "\" 2>/dev/null"
-        local okDB, dbResult = pcall(hs.execute, cmd)
-        if okDB and dbResult and dbResult ~= "" then
-            local ok, sessions = pcall(hs.json.decode, dbResult)
-            if ok and type(sessions) == "table" then
-                for _, s in ipairs(sessions) do
-                    if s.directory and not newData[s.directory] then
-                        local m = {}
-                        if s.model then
-                            local ok2, parsed = pcall(hs.json.decode, s.model)
-                            if ok2 and type(parsed) == "table" then m = parsed end
-                        end
-                        newData[s.directory] = {
-                            title    = s.title,
-                            modelID  = m.id,
-                            provider = m.providerID,
-                            agent    = s.agent,
-                            tokensIn = s.tokens_input or 0,
-                            tokensOut = s.tokens_output or 0,
-                            updated  = s.time_updated or 0,
-                        }
-                    end
-                end
+            -- If HTTP returned data (or server responded with bad data), finalize
+            if next(newData) or hadResponse then
+                self:_finalizeOpenCodeData(newData)
+                return
             end
-        end
-    end
 
-    local sessionCount = 0
-    for _ in pairs(newData) do sessionCount = sessionCount + 1 end
-    local matchCount = 0
-    for _, win in ipairs(getITermWindows()) do
-        local fp = getWindowWorkingDir(win)
-        if fp and newData[fp] then
-            matchCount = matchCount + 1
-        end
-    end
+            -- Fall back to SQLite database (no HTTP response at all)
+            local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
+            local sql = "SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
 
-    self._opencodeData = newData
+            local sqlOk = pcall(function()
+                hs.task.new("/usr/bin/sqlite3", function(_, dbStdout, _)
+                    local newData = {}
+
+                    if dbStdout and dbStdout ~= "" then
+                        local ok, sessions = pcall(hs.json.decode, dbStdout)
+                        if ok and type(sessions) == "table" then
+                            for _, s in ipairs(sessions) do
+                                if s.directory and not newData[s.directory] then
+                                    local m = {}
+                                    if s.model then
+                                        local ok2, parsed = pcall(hs.json.decode, s.model)
+                                        if ok2 and type(parsed) == "table" then m = parsed end
+                                    end
+                                    newData[s.directory] = {
+                                        title    = s.title,
+                                        modelID  = m.id,
+                                        provider = m.providerID,
+                                        agent    = s.agent,
+                                        tokensIn = s.tokens_input or 0,
+                                        tokensOut = s.tokens_output or 0,
+                                        updated  = s.time_updated or 0,
+                                    }
+                                end
+                            end
+                        end
+                    end
+
+                    self:_finalizeOpenCodeData(newData)
+                end, {"-json", dbPath, sql}):start()
+            end)
+            if not sqlOk then
+                self:_finalizeOpenCodeData({})
+            end
+        end, {"-s", "-m", "2", "http://127.0.0.1:" .. self.config.opencode.port .. "/session"}):start()
+    end)
+    if not curlOk then
+        self._opencodePending = false
+    end
 end
 
 function obj:startOpenCodePolling()
     self:fetchOpenCodeData()
-    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-        self:buildSidebar()
-    end
     if self._opencodePollTimer then self._opencodePollTimer:stop() end
     self._opencodePollTimer = hs.timer.new(self.config.opencode.pollInterval, function()
         self:fetchOpenCodeData()
-        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-            self:buildSidebar()
-        end
     end)
     self._opencodePollTimer:start()
 end
 
-function obj:fetchClaudeCodeData()
-    local newData = {}
+local function fetchClaudeCodeForWindow(win, fullPath, callback)
+    local winId = win:id()
 
-    local wins = getITermWindows()
-    for _, win in ipairs(wins) do
-        local fullPath = getWindowWorkingDir(win)
-        if not fullPath then goto continue end
+    -- Already have fresh data for this path
+    if _ccPathKey[winId] == fullPath and _ccCache[winId] ~= nil then
+        if callback then callback() end
+        return
+    end
 
-        local projectDir = claudeProjectDir(fullPath)
-        local latestFile = hs.execute(
-            "ls -t '" .. projectDir .. "'/*.jsonl 2>/dev/null | head -1"
-        ):gsub("%s+$", "")
+    -- Fetch already in flight
+    if _ccPending[winId] then
+        if callback then callback() end
+        return
+    end
+    _ccPending[winId] = true
 
-        if latestFile == "" then goto continue end
+    local projectDir = claudeProjectDir(fullPath)
 
-        local content = hs.execute("tail -50 '" .. latestFile .. "' 2>/dev/null")
-        local model, tokensIn, tokensOut = nil, 0, 0
+    -- Step 1: find the latest .jsonl file (async)
+    hs.task.new("/bin/sh", function(_, latestFile, _)
+        latestFile = latestFile and latestFile:gsub("%s+$", "") or ""
+        if latestFile == "" then
+            _ccPending[winId] = nil
+            _ccCache[winId]   = false
+            _ccPathKey[winId] = fullPath
+            if callback then callback() end
+            return
+        end
 
-        for line in content:gmatch("[^\n]+") do
-            local ok, msg = pcall(hs.json.decode, line)
-            if ok and type(msg) == "table" then
-                if msg.type == "assistant" and msg.message then
+        -- Step 2: tail the file (async, chained)
+        hs.task.new("/bin/sh", function(_, content, _)
+            _ccPending[winId] = nil
+            local model, tokensIn, tokensOut = nil, 0, 0
+            for line in (content or ""):gmatch("[^\n]+") do
+                local ok, msg = pcall(hs.json.decode, line)
+                if ok and type(msg) == "table" and msg.type == "assistant" and msg.message then
                     if msg.message.model then
                         model = msg.message.model
                     end
@@ -452,33 +562,57 @@ function obj:fetchClaudeCodeData()
                     end
                 end
             end
-        end
+            _ccCache[winId]   = (model or tokensIn > 0)
+                and { model = model, tokensIn = tokensIn, tokensOut = tokensOut }
+                or false
+            _ccPathKey[winId] = fullPath
+            if callback then callback() end
+        end, {"-c", "tail -50 '" .. latestFile .. "' 2>/dev/null"}):start()
 
-        if model or tokensIn > 0 then
-            newData[fullPath] = {
-                model     = model,
-                tokensIn  = tokensIn,
-                tokensOut = tokensOut,
-            }
-        end
+    end, {"-c", "ls -t '" .. projectDir .. "'/*.jsonl 2>/dev/null | head -1"}):start()
+end
 
-        ::continue::
+function obj:fetchClaudeCodeData()
+    local wins = getITermWindows()
+    if #wins == 0 then return end
+
+    local pending = #wins
+    if pending == 0 then return end
+
+    local function oneDone()
+        pending = pending - 1
+        if pending == 0 then
+            local newData = {}
+            for _, win in ipairs(wins) do
+                local id = win:id()
+                local fp = _wdCache[id]
+                if fp and _ccCache[id] then
+                    newData[fp] = _ccCache[id]
+                end
+            end
+            self._claudeCodeData = newData
+            if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+                self:buildSidebar()
+            end
+        end
     end
 
-    self._claudeCodeData = newData
+    for _, win in ipairs(wins) do
+        -- Phase 3 fix #5: use getWindowWorkingDir to trigger async fetch if cold
+        local fullPath = getWindowWorkingDir(win)
+        if not fullPath then
+            oneDone()
+        else
+            fetchClaudeCodeForWindow(win, fullPath, oneDone)
+        end
+    end
 end
 
 function obj:startClaudeCodePolling()
     self:fetchClaudeCodeData()
-    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-        self:buildSidebar()
-    end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop() end
     self._claudeCodePollTimer = hs.timer.new(self.config.claudecode.pollInterval, function()
         self:fetchClaudeCodeData()
-        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-            self:buildSidebar()
-        end
     end)
     self._claudeCodePollTimer:start()
 end
@@ -548,48 +682,87 @@ end
 -- Sidebar
 -- ─────────────────────────────────────────────
 
+local function ocSnippet(data, fullPath)
+    if not data or not fullPath or not data[fullPath] then return "" end
+    local d = data[fullPath]
+    return tostring(d.tokensIn or 0) .. "/" .. tostring(d.tokensOut or 0)
+end
+
+-- Phase 3 fix #3: snapshot reads _ccCache[id] directly per-window so it
+-- reflects the latest async fetch rather than the batched _claudeCodeData table.
+local function ccSnippet(winId)
+    local d = _ccCache[winId]
+    if not d then return "" end
+    return tostring(d.tokensIn or 0) .. "/" .. tostring(d.tokensOut or 0)
+end
+
+local function sidebarStateSnapshot(wins, activeId, opencodeData)
+    local parts = {}
+    for _, win in ipairs(wins) do
+        local id = win:id()
+        local fullPath = _wdCache[id] or ""
+        table.insert(parts, table.concat({
+            tostring(id),
+            win:title() or "",
+            tostring(obj._customNames and obj._customNames[id] or ""),
+            tostring(id == activeId),
+            tostring(_flashState[id] or false),
+            tostring(claudeState(win) or ""),
+            tostring(fullPath),
+            tostring(_gitBranchCache[id] or ""),
+            ocSnippet(opencodeData, fullPath),
+            ccSnippet(id),
+        }, "\t"))
+    end
+    return table.concat(parts, "|")
+end
+
+local function sidebarStructureSnapshot(wins, sbW, sbH)
+    return #wins .. ":" .. sbW .. "x" .. sbH
+end
+
+local function buttonStructureKey(basename, branch, ocData, ccData)
+    return (basename and "1" or "0")
+        .. (branch   and "1" or "0")
+        .. (ocData   and "1" or "0")
+        .. (ccData   and "1" or "0")
+end
+
 function obj:buildSidebar()
+    -- Phase 3 fix #4: debounce rapid back-to-back calls (e.g. multiple async
+    -- callbacks firing in the same event loop tick).
+    if self._buildDebounceTimer then
+        self._buildDebounceTimer:stop()
+        self._buildDebounceTimer = nil
+    end
+    self._buildDebounceTimer = hs.timer.doAfter(0.05, function()
+        self._buildDebounceTimer = nil
+        self:_doBuildSidebar()
+    end)
+end
+
+function obj:_doBuildSidebar()
     if self._buildPending then return end
     self._buildPending = true
-    if self.sidebarCanvas then
-        if not self._pendingSidebarFrame then
-            self._pendingSidebarFrame = self.sidebarCanvas:frame()
-        end
-        self.sidebarCanvas:delete()
-        self.sidebarCanvas = nil
+
+    local wins = getITermWindows()
+    local snap = sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData)
+    if snap == self._lastSidebarSnapshot then
+        self._buildPending = false
+        return
     end
+    self._lastSidebarSnapshot = snap
 
     local layout = self:computeLayout()
     local sb  = layout.sidebar
     local cfg = self.config
 
-    local canvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
-    canvas:level(hs.canvas.windowLevels.floating)
-    canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
-    canvas:alpha(1)
+    local structureSnap = sidebarStructureSnapshot(wins, sb.w, sb.h)
+    local needsFullRebuild = (self.sidebarCanvas == nil)
+                          or (structureSnap ~= self._lastStructureSnapshot)
 
-    -- Background
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = 0, y = 0, w = sb.w, h = sb.h },
-        fillColor = color(cfg.sidebarColor),
-        strokeWidth = 0,
-    })
-
-    -- Right border
-    canvas:appendElements({
-        type = "rectangle",
-        frame = { x = sb.w - 1, y = 0, w = 1, h = sb.h },
-        fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
-        strokeWidth = 0,
-    })
-
-    -- Window buttons
-    local itermWins = getITermWindows()
-    local y = 6
-    self._buttonFrames = {}
-
-    -- If we have a saved ordering, reorder itermWins to match
+    -- Apply ordering to wins
+    local itermWins = wins
     if self._orderedWindowIds and #self._orderedWindowIds > 0 then
         local winMap = {}
         for _, win in ipairs(itermWins) do
@@ -610,12 +783,9 @@ function obj:buildSidebar()
         itermWins = ordered
     end
 
-    local textW    = sb.w - cfg.padding * 2 - 12
-    local textX    = cfg.padding + 6
-    local elemIdx  = 3
-
-    self._btnBgElements = {}
-
+    -- ── Pass 1: gather per-window data and detect structure changes ──
+    local winData = {}
+    local needsAnyWindowRebuild = false
     for i, win in ipairs(itermWins) do
         local winId    = win:id()
         local isActive = (winId == self.activeWindowId)
@@ -625,6 +795,8 @@ function obj:buildSidebar()
         local isFocused  = focusedWin and focusedWin:id() == winId
         if state == "waiting" and _flashState[winId] and not isFocused then
             btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+        elseif state == "bell" and _flashState[winId] and not isFocused then
+            btnColor = cfg.bell.flashColor
         elseif state == "busy" then
             btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
         elseif isActive then
@@ -636,61 +808,17 @@ function obj:buildSidebar()
         local parts    = parseTitleComponents(rawTitle)
         local fullPath = getWindowWorkingDir(win)
         local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
-
-        -- Button background
-        canvas:appendElements({
-            type = "rectangle",
-            frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
-            fillColor = color(btnColor),
-            strokeWidth = 0,
-            roundedRectRadii = { xRadius = 4, yRadius = 4 },
-        })
-        self._btnBgElements[winId] = elemIdx
-        elemIdx = elemIdx + 1
-
-        -- ── Line 1: custom rename → hostname → "Window N" fallback ──
+        local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
         local label = self._customNames[winId]
             or parts.host
+            or basename
             or ("Window " .. i)
-        canvas:appendElements({
-            type          = "text",
-            frame         = { x = textX, y = y + 5, w = textW, h = 15 },
-            text          = label,
-            textColor     = color(cfg.textColor),
-            textSize      = 11,
-            textAlignment = "left",
-        })
-        elemIdx = elemIdx + 1
 
-        -- ── Line 2: PWD basename ──
-        if basename then
-            local base = basename
-            canvas:appendElements({
-                type          = "text",
-                frame         = { x = textX, y = y + 22, w = textW, h = 13 },
-                text          = base,
-                textColor     = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
-                textSize      = 10,
-                textAlignment = "left",
-            })
-            elemIdx = elemIdx + 1
+        -- Hide Line 2 (PWD) when it would duplicate Line 1
+        if basename and basename == label then
+            basename = nil
         end
 
-        -- ── Line 3: git branch ──
-        local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
-        if branch then
-            canvas:appendElements({
-                type          = "text",
-                frame         = { x = textX, y = y + 38, w = textW, h = 13 },
-                text          = "⎇ " .. branch,
-                textColor     = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
-                textSize      = 10,
-                textAlignment = "left",
-            })
-            elemIdx = elemIdx + 1
-        end
-
-        -- ── Line 4: opencode session info ──
         local ocData
         if fullPath and self._opencodeData[fullPath] then
             ocData = self._opencodeData[fullPath]
@@ -702,70 +830,279 @@ function obj:buildSidebar()
                 end
             end
         end
-        if ocData then
-            local modelStr = shortModelName(ocData.modelID) or ""
-            local agentStr = ocData.agent or ""
-            local tokStr = ""
-            if ocData.tokensIn and ocData.tokensIn > 0 then
-                tokStr = fmtTokens(ocData.tokensIn) .. " in"
-                if ocData.tokensOut and ocData.tokensOut > 0 then
-                    tokStr = tokStr .. " · " .. fmtTokens(ocData.tokensOut) .. " out"
-                end
-            end
-            local segments = {}
-            if modelStr ~= "" then table.insert(segments, modelStr) end
-            if agentStr ~= "" then table.insert(segments, agentStr) end
-            if tokStr ~= "" then table.insert(segments, tokStr) end
-            local ocText = table.concat(segments, "  ")
-            canvas:appendElements({
-                type          = "text",
-                frame         = { x = textX, y = y + 53, w = textW, h = 12 },
-                text          = ocText,
-                textColor     = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
-                textSize      = 9,
-                textAlignment = "left",
-            })
-            elemIdx = elemIdx + 1
+        local ccData = _ccCache[winId]
+        local bKey = buttonStructureKey(basename, branch, ocData, ccData)
+
+        if self._btnStructureKeys[winId] ~= bKey then
+            needsAnyWindowRebuild = true
         end
 
-        -- ── Line 5: Claude Code session info ──
-        local ccData = fullPath and self._claudeCodeData and self._claudeCodeData[fullPath]
-        if ccData then
-            local modelShort = shortModelName(ccData.model) or ""
-            local tokStr = ""
-            if ccData.tokensIn > 0 then
-                tokStr = fmtTokens(ccData.tokensIn) .. "▲ " .. fmtTokens(ccData.tokensOut) .. "▼"
-            end
-            local pr = self._ghAvailable and getOpenPRForWindow(win) or nil
-            local prStr = pr and ("#" .. pr.number) or ""
-            local segments = {}
-            if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
-            if tokStr     ~= "" then table.insert(segments, tokStr) end
-            if prStr      ~= "" then table.insert(segments, prStr) end
-            local ccText = table.concat(segments, "  ")
-            canvas:appendElements({
-                type          = "text",
-                frame         = { x = textX, y = y + 68, w = textW, h = 12 },
-                text          = ccText,
-                textColor     = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
-                textSize      = 9,
-                textAlignment = "left",
-            })
-            elemIdx = elemIdx + 1
-        end
-
-        self._buttonFrames[i] = {
-            x = cfg.padding, y = y,
-            w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
-            windowId = winId,
+        winData[i] = {
+            win      = win,
+            winId    = winId,
+            btnColor = btnColor,
+            label    = label,
+            basename = basename,
+            branch   = branch,
+            ocData   = ocData,
+            ccData   = ccData,
+            bKey     = bKey,
         }
-        y = y + cfg.windowButtonHeight + 4
     end
 
-    self.sidebarCanvas = canvas
-    self._pendingSidebarFrame = nil
-    canvas:show()
+    local ok, err = pcall(function()
+        if needsFullRebuild then
+            if self.sidebarCanvas then
+                if not self._pendingSidebarFrame then
+                    self._pendingSidebarFrame = self.sidebarCanvas:frame()
+                end
+                self.sidebarCanvas:delete()
+                self.sidebarCanvas = nil
+            end
+
+            self.sidebarCanvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
+            self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+            self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+            self.sidebarCanvas:alpha(1)
+            self._lastStructureSnapshot = structureSnap
+        elseif needsAnyWindowRebuild then
+            self.sidebarCanvas:replaceElements()
+        end
+
+        if needsFullRebuild or needsAnyWindowRebuild then
+            -- Background
+            self.sidebarCanvas:appendElements({
+                type = "rectangle",
+                frame = { x = 0, y = 0, w = sb.w, h = sb.h },
+                fillColor = color(cfg.sidebarColor),
+                strokeWidth = 0,
+            })
+
+            -- Right border
+            self.sidebarCanvas:appendElements({
+                type = "rectangle",
+                frame = { x = sb.w - 1, y = 0, w = 1, h = sb.h },
+                fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
+                strokeWidth = 0,
+            })
+
+            local textW    = sb.w - cfg.padding * 2 - 12
+            local textX    = cfg.padding + 6
+            local elemIdx  = 3
+            local y = 6
+
+            self._btnBgElements = {}
+            self._buttonFrames  = {}
+
+            for i, wd in ipairs(winData) do
+                local winId = wd.winId
+
+                -- Button background
+                self.sidebarCanvas:appendElements({
+                    type = "rectangle",
+                    frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
+                    fillColor = color(wd.btnColor),
+                    strokeWidth = 0,
+                    roundedRectRadii = { xRadius = 4, yRadius = 4 },
+                })
+                local map = { bg = elemIdx }
+                elemIdx = elemIdx + 1
+
+                -- ── Line 1: custom rename → hostname → "Window N" fallback ──
+                self.sidebarCanvas:appendElements({
+                    type          = "text",
+                    frame         = { x = textX, y = y + 5, w = textW, h = 15 },
+                    text          = wd.label,
+                    textColor     = color(cfg.textColor),
+                    textSize      = 11,
+                    textAlignment = "left",
+                })
+                map.line1 = elemIdx
+                elemIdx = elemIdx + 1
+
+                -- ── Line 2: PWD basename ──
+                if wd.basename then
+                    self.sidebarCanvas:appendElements({
+                        type          = "text",
+                        frame         = { x = textX, y = y + 22, w = textW, h = 13 },
+                        text          = wd.basename,
+                        textColor     = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
+                        textSize      = 10,
+                        textAlignment = "left",
+                    })
+                    map.line2 = elemIdx
+                    elemIdx = elemIdx + 1
+                end
+
+                -- ── Line 3: git branch ──
+                if wd.branch then
+                    self.sidebarCanvas:appendElements({
+                        type          = "text",
+                        frame         = { x = textX, y = y + 38, w = textW, h = 13 },
+                        text          = "⎇ " .. wd.branch,
+                        textColor     = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
+                        textSize      = 10,
+                        textAlignment = "left",
+                    })
+                    map.line3 = elemIdx
+                    elemIdx = elemIdx + 1
+                end
+
+                -- ── Line 4: opencode session info ──
+                if wd.ocData then
+                    local modelStr = shortModelName(wd.ocData.modelID) or ""
+                    local agentStr = wd.ocData.agent or ""
+                    local tokStr = ""
+                    if wd.ocData.tokensIn and wd.ocData.tokensIn > 0 then
+                        tokStr = fmtTokens(wd.ocData.tokensIn) .. " in"
+                        if wd.ocData.tokensOut and wd.ocData.tokensOut > 0 then
+                            tokStr = tokStr .. " · " .. fmtTokens(wd.ocData.tokensOut) .. " out"
+                        end
+                    end
+                    local segments = {}
+                    if modelStr ~= "" then table.insert(segments, modelStr) end
+                    if agentStr ~= "" then table.insert(segments, agentStr) end
+                    if tokStr ~= "" then table.insert(segments, tokStr) end
+                    local ocText = table.concat(segments, "  ")
+                    self.sidebarCanvas:appendElements({
+                        type          = "text",
+                        frame         = { x = textX, y = y + 53, w = textW, h = 12 },
+                        text          = ocText,
+                        textColor     = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
+                        textSize      = 9,
+                        textAlignment = "left",
+                    })
+                    map.line4 = elemIdx
+                    elemIdx = elemIdx + 1
+                end
+
+                -- ── Line 5: Claude Code session info (read directly from _ccCache) ──
+                if wd.ccData then
+                    local modelShort = shortModelName(wd.ccData.model) or ""
+                    local tokStr = ""
+                    if wd.ccData.tokensIn > 0 then
+                        tokStr = fmtTokens(wd.ccData.tokensIn) .. "▲ " .. fmtTokens(wd.ccData.tokensOut) .. "▼"
+                    end
+                    local pr = self._ghAvailable and getOpenPRForWindow(wd.win) or nil
+                    local prStr = pr and ("#" .. pr.number) or ""
+                    local segments = {}
+                    if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
+                    if tokStr     ~= "" then table.insert(segments, tokStr) end
+                    if prStr      ~= "" then table.insert(segments, prStr) end
+                    local ccText = table.concat(segments, "  ")
+                    self.sidebarCanvas:appendElements({
+                        type          = "text",
+                        frame         = { x = textX, y = y + 68, w = textW, h = 12 },
+                        text          = ccText,
+                        textColor     = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
+                        textSize      = 9,
+                        textAlignment = "left",
+                    })
+                    map.line5 = elemIdx
+                    elemIdx = elemIdx + 1
+                end
+
+                self._elementMap[winId] = map
+                self._btnStructureKeys[winId] = wd.bKey
+                self._btnBgElements[winId] = map.bg
+
+                if self.config.debug then
+                    hs.printf("elementMap[%d]: bg=%s l1=%s l2=%s l3=%s l4=%s l5=%s",
+                        winId,
+                        tostring(map.bg), tostring(map.line1), tostring(map.line2),
+                        tostring(map.line3), tostring(map.line4), tostring(map.line5))
+                end
+
+                self._buttonFrames[i] = {
+                    x = cfg.padding, y = y,
+                    w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
+                    windowId = winId,
+                }
+                y = y + cfg.windowButtonHeight + 4
+            end
+
+            self._pendingSidebarFrame = nil
+            if needsFullRebuild then
+                self.sidebarCanvas:show()
+                self.sidebarCanvas:raise()
+            end
+        else
+            -- ── In-place update path: elementAttribute calls only ──
+            self._buttonFrames = {}
+            local y = 6
+            for i, wd in ipairs(winData) do
+                local winId = wd.winId
+                local map   = self._elementMap[winId]
+                if map then
+                    self.sidebarCanvas:elementAttribute(map.bg, "fillColor", color(wd.btnColor))
+                    self.sidebarCanvas:elementAttribute(map.line1, "text", wd.label)
+                    if map.line2 then
+                        local baseText = wd.basename or ""
+                        self.sidebarCanvas:elementAttribute(map.line2, "text", baseText)
+                    end
+                    if map.line3 then
+                        local branchText = wd.branch and ("⎇ " .. wd.branch) or ""
+                        self.sidebarCanvas:elementAttribute(map.line3, "text", branchText)
+                    end
+                    if map.line4 then
+                        local ocText = ""
+                        if wd.ocData then
+                            local modelStr = shortModelName(wd.ocData.modelID) or ""
+                            local agentStr = wd.ocData.agent or ""
+                            local tokStr = ""
+                            if wd.ocData.tokensIn and wd.ocData.tokensIn > 0 then
+                                tokStr = fmtTokens(wd.ocData.tokensIn) .. " in"
+                                if wd.ocData.tokensOut and wd.ocData.tokensOut > 0 then
+                                    tokStr = tokStr .. " · " .. fmtTokens(wd.ocData.tokensOut) .. " out"
+                                end
+                            end
+                            local segments = {}
+                            if modelStr ~= "" then table.insert(segments, modelStr) end
+                            if agentStr ~= "" then table.insert(segments, agentStr) end
+                            if tokStr ~= "" then table.insert(segments, tokStr) end
+                            ocText = table.concat(segments, "  ")
+                        end
+                        self.sidebarCanvas:elementAttribute(map.line4, "text", ocText)
+                    end
+                    if map.line5 then
+                        local ccText = ""
+                        if wd.ccData then
+                            local modelShort = shortModelName(wd.ccData.model) or ""
+                            local tokStr = ""
+                            if wd.ccData.tokensIn > 0 then
+                                tokStr = fmtTokens(wd.ccData.tokensIn) .. "▲ " .. fmtTokens(wd.ccData.tokensOut) .. "▼"
+                            end
+                            local win = hs.window.get(winId)
+                            local pr = win and self._ghAvailable and getOpenPRForWindow(win) or nil
+                            local prStr = pr and ("#" .. pr.number) or ""
+                            local segments = {}
+                            if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
+                            if tokStr     ~= "" then table.insert(segments, tokStr) end
+                            if prStr      ~= "" then table.insert(segments, prStr) end
+                            ccText = table.concat(segments, "  ")
+                        end
+                        self.sidebarCanvas:elementAttribute(map.line5, "text", ccText)
+                    end
+                end
+
+                self._btnStructureKeys[winId] = wd.bKey
+
+                self._buttonFrames[i] = {
+                    x = cfg.padding, y = y,
+                    w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
+                    windowId = winId,
+                }
+                y = y + cfg.windowButtonHeight + 4
+            end
+            self._pendingSidebarFrame = nil
+        end
+    end)
+
     self._buildPending = false
+
+    if not ok then
+        hs.printf("buildSidebar crashed: %s", tostring(err))
+    end
 end
 
 -- ─────────────────────────────────────────────
@@ -787,10 +1124,13 @@ end
 function obj:bringWindowToFront(windowId)
     local win = hs.window.get(windowId)
     if not win then return end
-    stopFlashing(windowId)        -- ← add this before focus
+    stopFlashing(windowId)
     self.activeWindowId = windowId
-    win:raise()
-    win:focus()
+    local ok = pcall(function()
+        win:raise()
+        win:focus()
+    end)
+    if not ok then return end
     self:buildSidebar()
 end
 
@@ -823,10 +1163,34 @@ function obj:renameWindow(windowId)
     )
     if button == "Rename" and input and input ~= "" then
         self._customNames[windowId] = input
-        self:buildSidebar()
+        hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
+        local fullPath = _wdCache[windowId]
+        if fullPath then
+            self._customNamesByPath[fullPath] = input
+            hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
+        else
+            self._pendingPathNames[windowId] = input
+            if win then getWindowWorkingDir(win) end
+        end
+        hs.timer.doAfter(0.05, function()
+            self._lastSidebarSnapshot = nil
+            self:buildSidebar()
+        end)
     elseif button == "Rename" and (not input or input == "") then
         self._customNames[windowId] = nil
-        self:buildSidebar()
+        hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
+        local fullPath = _wdCache[windowId]
+        if fullPath then
+            self._customNamesByPath[fullPath] = nil
+            hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
+        else
+            self._pendingPathNames[windowId] = false
+            if win then getWindowWorkingDir(win) end
+        end
+        hs.timer.doAfter(0.05, function()
+            self._lastSidebarSnapshot = nil
+            self:buildSidebar()
+        end)
     end
 end
 
@@ -968,12 +1332,23 @@ end
 
 function obj:moveWindowById(windowId, direction)
     if not self._orderedWindowIds then self._orderedWindowIds = {} end
-    if #self._orderedWindowIds == 0 then
-        local wins = getITermWindows()
-        for _, win in ipairs(wins) do
-            table.insert(self._orderedWindowIds, win:id())
+    local wins = getITermWindows()
+    local liveIds = {}
+    for _, win in ipairs(wins) do liveIds[win:id()] = true end
+    local filtered = {}
+    local filteredSet = {}
+    for _, id in ipairs(self._orderedWindowIds) do
+        if liveIds[id] then
+            table.insert(filtered, id)
+            filteredSet[id] = true
         end
     end
+    for _, win in ipairs(wins) do
+        if not filteredSet[win:id()] then
+            table.insert(filtered, win:id())
+        end
+    end
+    self._orderedWindowIds = filtered
     if #self._orderedWindowIds < 2 then return end
 
     local currentIdx
@@ -987,17 +1362,31 @@ function obj:moveWindowById(windowId, direction)
 
     self._orderedWindowIds[currentIdx], self._orderedWindowIds[newIdx] =
         self._orderedWindowIds[newIdx], self._orderedWindowIds[currentIdx]
+    hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
+    self._lastStructureSnapshot = nil
+    self._lastSidebarSnapshot = nil
     self:buildSidebar()
 end
 
 function obj:moveWindowToExtent(windowId, extent)
     if not self._orderedWindowIds then self._orderedWindowIds = {} end
-    if #self._orderedWindowIds == 0 then
-        local wins = getITermWindows()
-        for _, win in ipairs(wins) do
-            table.insert(self._orderedWindowIds, win:id())
+    local wins = getITermWindows()
+    local liveIds = {}
+    for _, win in ipairs(wins) do liveIds[win:id()] = true end
+    local filtered = {}
+    local filteredSet = {}
+    for _, id in ipairs(self._orderedWindowIds) do
+        if liveIds[id] then
+            table.insert(filtered, id)
+            filteredSet[id] = true
         end
     end
+    for _, win in ipairs(wins) do
+        if not filteredSet[win:id()] then
+            table.insert(filtered, win:id())
+        end
+    end
+    self._orderedWindowIds = filtered
     if #self._orderedWindowIds < 2 then return end
 
     local currentIdx
@@ -1011,6 +1400,9 @@ function obj:moveWindowToExtent(windowId, extent)
 
     table.remove(self._orderedWindowIds, currentIdx)
     table.insert(self._orderedWindowIds, targetIdx, windowId)
+    hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
+    self._lastStructureSnapshot = nil
+    self._lastSidebarSnapshot = nil
     self:buildSidebar()
 end
 
@@ -1029,6 +1421,13 @@ function obj:focusNextWindow(direction)
         local filtered = {}
         for _, id in ipairs(self._orderedWindowIds) do
             if liveIds[id] then table.insert(filtered, id) end
+        end
+        local filteredSet = {}
+        for _, id in ipairs(filtered) do filteredSet[id] = true end
+        for _, win in ipairs(wins) do
+            if not filteredSet[win:id()] then
+                table.insert(filtered, win:id())
+            end
         end
         self._orderedWindowIds = filtered
     end
@@ -1112,6 +1511,7 @@ function obj:handleWindowMoveOrResize()
                 self.sidebarCanvas:delete()
                 self.sidebarCanvas = nil
             end
+            self._lastStructureSnapshot = nil
             self:buildSidebar()
             self:tileITermWindows()
             return
@@ -1154,6 +1554,7 @@ function obj:handleWindowMoveOrResize()
             local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
             for _, w in ipairs(wins) do w:setFrame(newFrame) end
 
+            self._lastStructureSnapshot = nil
             self:buildSidebar()
         end
     end)
@@ -1202,10 +1603,10 @@ function obj:bindHotkeys(mapping)
         if iterm then
             iterm:activate()
             hs.eventtap.keyStroke({"cmd"}, "n")
-            hs.timer.doAfter(0.5, function() self:buildSidebar(); self:tileITermWindows() end)
+            hs.timer.doAfter(0.5, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
         else
             hs.application.open("com.googlecode.iterm2")
-            hs.timer.doAfter(1.0, function() self:buildSidebar(); self:tileITermWindows() end)
+            hs.timer.doAfter(1.0, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
         end
     end)
 
@@ -1267,15 +1668,13 @@ function obj:start()
         {
             hs.eventtap.event.types.leftMouseDown,
             hs.eventtap.event.types.rightMouseDown,
-            hs.eventtap.event.types.leftMouseDragged,
-            hs.eventtap.event.types.leftMouseUp,
         },
         function(event)
-            local eventType = event:getType()
-            local mouse     = hs.mouse.absolutePosition()
-
             if not self.sidebarCanvas then return false end
+
+            local eventType = event:getType()
             local sf = self.sidebarCanvas:frame()
+            local mouse = hs.mouse.absolutePosition()
 
             local inSidebar = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
                 and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
@@ -1309,7 +1708,7 @@ function obj:start()
     self._winWatcher = hs.window.filter.new("iTerm2")
     self._winWatcher:subscribe("windowCreated", function(win)
         if win then self:watchWindow(win) end
-        hs.timer.doAfter(0.3, function() self:buildSidebar(); self:tileITermWindows() end)
+        hs.timer.doAfter(0.3, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
     end)
     self._winWatcher:subscribe("windowDestroyed", function(win)
         local id = win and win:id()
@@ -1325,18 +1724,26 @@ function obj:start()
             _prPending[id]       = nil
             _wdCache[id]         = nil
             _wdFlight[id]        = nil
+            _ccCache[id]   = nil
+            _ccPending[id] = nil
+            _ccPathKey[id] = nil
             stopFlashing(id)
         end
-        hs.timer.doAfter(0.3, function() self:buildSidebar() end)
+        hs.timer.doAfter(0.3, function() self._lastStructureSnapshot = nil; self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowTitleChanged", function(win)
         local isCCStateChange
+        local isBellStateChange
         if win then
             local id = win:id()
             local title = win:title() or ""
-            isCCStateChange = title:match("^✳") or title:match("^·")
-            if not isCCStateChange then
-                _wdCache[id] = nil
+            local stripped = title:gsub("^🔔", "")
+            isCCStateChange = stripped:match("^✳") or stripped:match("^·")
+            isBellStateChange = title:match("^🔔")
+            if not isCCStateChange and not isBellStateChange then
+                _wdCache[id]        = nil
+                _ccCache[id]        = nil
+                _ccPathKey[id]      = nil
                 _gitBranchCache[id] = nil
             end
             local focusedWin = hs.window.focusedWindow()
@@ -1344,11 +1751,13 @@ function obj:start()
             local state = claudeState(win)
             if state == "waiting" and not isFocused then
                 startFlashing(id)
+            elseif state == "bell" and not isFocused then
+                startFlashing(id, "bell")
             else
                 stopFlashing(id)
             end
         end
-        if not isCCStateChange then
+        if not isCCStateChange or isBellStateChange then
             hs.timer.doAfter(0.1, function() self:buildSidebar() end)
         end
     end)
@@ -1356,22 +1765,77 @@ function obj:start()
         self:handleWindowMoveOrResize()
     end)
     self._winWatcher:subscribe("windowFocused", function(win)
-        if self._mouseTap then
-            self._mouseTap:stop()
-            self._mouseTap:start()
-        end
         if win and isITerm(win) then
             self.activeWindowId = win:id()
             stopFlashing(win:id())
         end
         if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self.sidebarCanvas:raise()
             self:handleWindowMoveOrResize()
         end
     end)
 
+    -- Load path-keyed names BEFORE triggering async WD fetches, so the
+    -- callback in getWindowWorkingDir finds _customNamesByPath populated.
+    local savedNamesByPath = hs.settings.get(SETTINGS_KEY_NAMES_BY_PATH)
+    if savedNamesByPath then
+        self._customNamesByPath = savedNamesByPath
+    end
+
     for _, win in ipairs(getITermWindows()) do
         self:watchWindow(win)
+        -- bootstrap WD fetch on cold start so git/cc data
+        -- is available as soon as the async AppleScript returns.
+        getWindowWorkingDir(win)
     end
+
+    -- Restore persisted order
+    local savedOrder = hs.settings.get(SETTINGS_KEY_ORDER)
+
+    if savedOrder then
+        local liveWins = getITermWindows()
+        local liveIds  = {}
+        for _, w in ipairs(liveWins) do liveIds[w:id()] = true end
+        local filtered = {}
+        for _, id in ipairs(savedOrder) do
+            local numId = tonumber(id)
+            if numId and liveIds[numId] then table.insert(filtered, numId) end
+        end
+        self._orderedWindowIds = filtered
+    end
+
+    -- Apply path-keyed custom names for any window whose WD resolved synchronously
+    if savedNamesByPath then
+        local liveWins = getITermWindows()
+        for _, w in ipairs(liveWins) do
+            local id = w:id()
+            local path = _wdCache[id]
+            if path and savedNamesByPath[path] and not self._customNames[id] then
+                self._customNames[id] = savedNamesByPath[path]
+            end
+        end
+    end
+
+    -- Deferred re-apply of path-keyed names once async WD fetches have settled
+    local function reapplyPathNames()
+        if not savedNamesByPath then return end
+        local liveWins = getITermWindows()
+        local needsRebuild = false
+        for _, w in ipairs(liveWins) do
+            local id = w:id()
+            local path = _wdCache[id]
+            if path and savedNamesByPath[path] and not self._customNames[id] then
+                self._customNames[id] = savedNamesByPath[path]
+                needsRebuild = true
+            end
+        end
+        if needsRebuild and self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self._lastSidebarSnapshot = nil
+            self:buildSidebar()
+        end
+    end
+    hs.timer.doAfter(10, reapplyPathNames)
+    hs.timer.doAfter(30, reapplyPathNames)
 
     if self._screenWatcher then self._screenWatcher:stop() end
     self._screenWatcher = hs.screen.watcher.new(function()
@@ -1382,16 +1846,31 @@ function obj:start()
                 self.sidebarCanvas:delete()
                 self.sidebarCanvas = nil
             end
+            self._lastStructureSnapshot = nil
             self:buildSidebar()
             self:tileITermWindows()
         end)
     end)
     self._screenWatcher:start()
 
+    if self._appWatcher then self._appWatcher:stop() end
+    self._appWatcher = hs.application.watcher.new(function(name, event, app)
+        if event == hs.application.watcher.activated then
+            if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+                hs.timer.doAfter(0, function()
+                    self.sidebarCanvas:raise()
+                end)
+            end
+        end
+    end)
+    self._appWatcher:start()
+
     self:buildSidebar()
     self:tileITermWindows()
 
-    self._ghAvailable = (hs.execute("which gh 2>/dev/null"):gsub("%s+$", "") ~= "")
+    hs.task.new("/usr/bin/which", function(exitCode, stdout, _)
+        self._ghAvailable = (exitCode == 0 and stdout and stdout:gsub("%s+$", "") ~= "")
+    end, {"gh"}):start()
 
     if self.config.opencode.enabled then
         self:startOpenCodePolling()
@@ -1406,14 +1885,29 @@ function obj:start()
 end
 
 function obj:stop()
+    -- Flush any pending path-name assignments before clearing caches
+    for winId, pending in pairs(self._pendingPathNames or {}) do
+        local path = _wdCache[winId]
+        if path and pending ~= nil then
+            self._customNamesByPath[path] = pending or nil
+        end
+    end
+    if self._orderedWindowIds and next(self._orderedWindowIds) then
+        hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
+    end
+    if self._customNamesByPath and next(self._customNamesByPath) then
+        hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
+    end
     if self._mouseTap      then self._mouseTap:stop();      self._mouseTap      = nil end
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
+    if self._appWatcher    then self._appWatcher:stop();    self._appWatcher    = nil end
     for _, w in pairs(self._windowWatchers or {}) do w:stop() end
     self._windowWatchers = {}
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
     if self._tipCanvas    then self._tipCanvas:delete();    self._tipCanvas    = nil end
     if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
+    if self._buildDebounceTimer then self._buildDebounceTimer:stop(); self._buildDebounceTimer = nil end
      _gitBranchCache   = {}
      _gitBranchPending = {}
      _prCache         = {}
@@ -1421,13 +1915,23 @@ function obj:stop()
      _prPending       = {}
      _wdCache         = {}
      _wdFlight        = {}
-     for _, t in pairs(_flashTimers) do t:stop() end
-     _flashTimers = {}
-     _flashState  = {}
-     _flashNormalColor = {}
+     if _sharedFlashTimer then _sharedFlashTimer:stop(); _sharedFlashTimer = nil end
+     _flashingWindows   = {}
+     _flashState        = {}
+     _flashNormalColor  = {}
+     _flashType         = {}
+     _ccCache   = {}
+     _ccPending = {}
+     _ccPathKey = {}
+     self._opencodePending = false
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
-    return self
+     self._elementMap          = {}
+     self._btnStructureKeys   = {}
+     self._pendingPathNames   = {}
+     self._lastSidebarSnapshot = nil
+     self._lastStructureSnapshot = nil
+     return self
 end
 
 function obj:init()
@@ -1436,22 +1940,31 @@ function obj:init()
     self.activeWindowId = nil
     self._currentScreen = nil
     self._buttonFrames  = {}
-    self._resizeDebounceTimer = nil
-    self._pendingSidebarFrame = nil
+    self._resizeDebounceTimer  = nil
+    self._buildDebounceTimer   = nil
+    self._pendingSidebarFrame  = nil
     self._mouseTap       = nil
     self._winWatcher     = nil
     self._screenWatcher  = nil
+    self._appWatcher     = nil
     self._tipCanvas      = nil
     self._tipKey         = nil
     self._windowWatchers   = {}
     self._customNames      = {}
+    self._customNamesByPath = {}
+    self._pendingPathNames  = {}
     self._orderedWindowIds = {}
     self._opencodeData     = {}
+    self._opencodePending  = false
     self._opencodePollTimer = nil
     self._claudeCodeData      = {}
     self._claudeCodePollTimer = nil
     self._ghAvailable         = false
     self._btnBgElements       = {}
+    self._elementMap          = {}
+    self._btnStructureKeys   = {}
+    self._lastSidebarSnapshot = nil
+    self._lastStructureSnapshot = nil
      _gitBranchCache   = {}
      _gitBranchPending = {}
      _prCache          = {}
@@ -1459,9 +1972,14 @@ function obj:init()
      _prPending        = {}
      _wdCache          = {}
      _wdFlight         = {}
-     _flashTimers      = {}
-     _flashState       = {}
-     _flashNormalColor = {}
+     _sharedFlashTimer  = nil
+     _flashingWindows   = {}
+     _flashState        = {}
+     _flashNormalColor  = {}
+     _flashType         = {}
+     _ccCache   = {}
+     _ccPending = {}
+     _ccPathKey = {}
      return self
 end
 
