@@ -211,7 +211,7 @@ local function getWindowWorkingDir(win)
                 end
                 if obj._pendingPathNames and obj._pendingPathNames[winId] ~= nil then
                     local pending = obj._pendingPathNames[winId]
-                    obj._customNamesByPath[resolvedPath] = pending or nil
+                    obj._customNamesByPath[resolvedPath] = pending or nil  -- false sentinel → nil (clear)
                     hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, obj._customNamesByPath)
                     obj._pendingPathNames[winId] = nil
                 end
@@ -1867,9 +1867,6 @@ end
 function obj:stop()
     if self._orderedWindowIds and next(self._orderedWindowIds) then
         hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
-    end
-    if self._customNames and next(self._customNames) then
-        hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
     end
     if self._customNamesByPath and next(self._customNamesByPath) then
         hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
