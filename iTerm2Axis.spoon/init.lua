@@ -1668,6 +1668,7 @@ function obj:start()
             stopFlashing(win:id())
         end
         if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self.sidebarCanvas:raise()
             self:handleWindowMoveOrResize()
         end
     end)
@@ -1737,6 +1738,18 @@ function obj:start()
     end)
     self._screenWatcher:start()
 
+    if self._appWatcher then self._appWatcher:stop() end
+    self._appWatcher = hs.application.watcher.new(function(name, event, app)
+        if event == hs.application.watcher.activated then
+            if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+                hs.timer.doAfter(0, function()
+                    self.sidebarCanvas:raise()
+                end)
+            end
+        end
+    end)
+    self._appWatcher:start()
+
     self:buildSidebar()
     self:tileITermWindows()
 
@@ -1769,6 +1782,7 @@ function obj:stop()
     if self._mouseTap      then self._mouseTap:stop();      self._mouseTap      = nil end
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
+    if self._appWatcher    then self._appWatcher:stop();    self._appWatcher    = nil end
     for _, w in pairs(self._windowWatchers or {}) do w:stop() end
     self._windowWatchers = {}
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
@@ -1811,6 +1825,7 @@ function obj:init()
     self._mouseTap       = nil
     self._winWatcher     = nil
     self._screenWatcher  = nil
+    self._appWatcher     = nil
     self._tipCanvas      = nil
     self._tipKey         = nil
     self._windowWatchers   = {}
