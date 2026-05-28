@@ -644,6 +644,13 @@ local function sidebarStructureSnapshot(wins, sbW, sbH)
     return #wins .. ":" .. sbW .. "x" .. sbH
 end
 
+local function buttonStructureKey(basename, branch, ocData, ccData)
+    return (basename and "1" or "0")
+        .. (branch   and "1" or "0")
+        .. (ocData   and "1" or "0")
+        .. (ccData   and "1" or "0")
+end
+
 function obj:buildSidebar()
     -- Phase 3 fix #4: debounce rapid back-to-back calls (e.g. multiple async
     -- callbacks firing in the same event loop tick).
@@ -677,6 +684,87 @@ function obj:_doBuildSidebar()
     local needsFullRebuild = (self.sidebarCanvas == nil)
                           or (structureSnap ~= self._lastStructureSnapshot)
 
+    -- Apply ordering to wins
+    local itermWins = wins
+    if self._orderedWindowIds and #self._orderedWindowIds > 0 then
+        local winMap = {}
+        for _, win in ipairs(itermWins) do
+            winMap[win:id()] = win
+        end
+        local ordered = {}
+        for _, wid in ipairs(self._orderedWindowIds) do
+            if winMap[wid] then
+                table.insert(ordered, winMap[wid])
+                winMap[wid] = nil
+            end
+        end
+        for _, win in ipairs(itermWins) do
+            if winMap[win:id()] then
+                table.insert(ordered, win)
+            end
+        end
+        itermWins = ordered
+    end
+
+    -- ── Pass 1: gather per-window data and detect structure changes ──
+    local winData = {}
+    local needsAnyWindowRebuild = false
+    for i, win in ipairs(itermWins) do
+        local winId    = win:id()
+        local isActive = (winId == self.activeWindowId)
+        local state    = claudeState(win)
+        local btnColor
+        local focusedWin = hs.window.focusedWindow()
+        local isFocused  = focusedWin and focusedWin:id() == winId
+        if state == "waiting" and _flashState[winId] and not isFocused then
+            btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+        elseif state == "busy" then
+            btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
+        elseif isActive then
+            btnColor = cfg.activeButtonColor
+        else
+            btnColor = cfg.buttonColor
+        end
+        local rawTitle = win:title() or ""
+        local parts    = parseTitleComponents(rawTitle)
+        local fullPath = getWindowWorkingDir(win)
+        local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
+        local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
+        local label = self._customNames[winId]
+            or parts.host
+            or ("Window " .. i)
+
+        local ocData
+        if fullPath and self._opencodeData[fullPath] then
+            ocData = self._opencodeData[fullPath]
+        else
+            for _, data in pairs(self._opencodeData or {}) do
+                if data.title and rawTitle:find(data.title, 1, true) then
+                    ocData = data
+                    break
+                end
+            end
+        end
+        local ccData = _ccCache[winId]
+        local bKey = buttonStructureKey(basename, branch, ocData, ccData)
+
+        if self._btnStructureKeys[winId] ~= bKey then
+            needsAnyWindowRebuild = true
+        end
+
+        winData[i] = {
+            win      = win,
+            winId    = winId,
+            btnColor = btnColor,
+            label    = label,
+            basename = basename,
+            branch   = branch,
+            ocData   = ocData,
+            ccData   = ccData,
+            bKey     = bKey,
+        }
+    end
+
     local ok, err = pcall(function()
         if needsFullRebuild then
             if self.sidebarCanvas then
@@ -692,224 +780,233 @@ function obj:_doBuildSidebar()
             self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
             self.sidebarCanvas:alpha(1)
             self._lastStructureSnapshot = structureSnap
-        else
+        elseif needsAnyWindowRebuild then
             self.sidebarCanvas:replaceElements()
         end
 
-        -- Background
-        self.sidebarCanvas:appendElements({
-            type = "rectangle",
-            frame = { x = 0, y = 0, w = sb.w, h = sb.h },
-            fillColor = color(cfg.sidebarColor),
-            strokeWidth = 0,
-        })
-
-        -- Right border
-        self.sidebarCanvas:appendElements({
-            type = "rectangle",
-            frame = { x = sb.w - 1, y = 0, w = 1, h = sb.h },
-            fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
-            strokeWidth = 0,
-        })
-
-        -- Window buttons
-        local itermWins = wins
-        local y = 6
-        self._buttonFrames = {}
-
-        -- If we have a saved ordering, reorder itermWins to match
-        if self._orderedWindowIds and #self._orderedWindowIds > 0 then
-            local winMap = {}
-            for _, win in ipairs(itermWins) do
-                winMap[win:id()] = win
-            end
-            local ordered = {}
-            for _, wid in ipairs(self._orderedWindowIds) do
-                if winMap[wid] then
-                    table.insert(ordered, winMap[wid])
-                    winMap[wid] = nil
-                end
-            end
-            for _, win in ipairs(itermWins) do
-                if winMap[win:id()] then
-                    table.insert(ordered, win)
-                end
-            end
-            itermWins = ordered
-        end
-
-        local textW    = sb.w - cfg.padding * 2 - 12
-        local textX    = cfg.padding + 6
-        local elemIdx  = 3
-
-        self._btnBgElements = {}
-
-        for i, win in ipairs(itermWins) do
-            local winId    = win:id()
-            local isActive = (winId == self.activeWindowId)
-            local state    = claudeState(win)
-            local btnColor
-            local focusedWin = hs.window.focusedWindow()
-            local isFocused  = focusedWin and focusedWin:id() == winId
-            if state == "waiting" and _flashState[winId] and not isFocused then
-                btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
-            elseif state == "busy" then
-                btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
-            elseif isActive then
-                btnColor = cfg.activeButtonColor
-            else
-                btnColor = cfg.buttonColor
-            end
-            local rawTitle = win:title() or ""
-            local parts    = parseTitleComponents(rawTitle)
-            local fullPath = getWindowWorkingDir(win)
-            local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
-
-            -- Button background
+        if needsFullRebuild or needsAnyWindowRebuild then
+            -- Background
             self.sidebarCanvas:appendElements({
                 type = "rectangle",
-                frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
-                fillColor = color(btnColor),
+                frame = { x = 0, y = 0, w = sb.w, h = sb.h },
+                fillColor = color(cfg.sidebarColor),
                 strokeWidth = 0,
-                roundedRectRadii = { xRadius = 4, yRadius = 4 },
             })
-            local map = { bg = elemIdx }
-            elemIdx = elemIdx + 1
 
-            -- ── Line 1: custom rename → hostname → "Window N" fallback ──
-            local label = self._customNames[winId]
-                or parts.host
-                or ("Window " .. i)
+            -- Right border
             self.sidebarCanvas:appendElements({
-                type          = "text",
-                frame         = { x = textX, y = y + 5, w = textW, h = 15 },
-                text          = label,
-                textColor     = color(cfg.textColor),
-                textSize      = 11,
-                textAlignment = "left",
+                type = "rectangle",
+                frame = { x = sb.w - 1, y = 0, w = 1, h = sb.h },
+                fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
+                strokeWidth = 0,
             })
-            map.line1 = elemIdx
-            elemIdx = elemIdx + 1
 
-            -- ── Line 2: PWD basename ──
-            if basename then
-                local base = basename
+            local textW    = sb.w - cfg.padding * 2 - 12
+            local textX    = cfg.padding + 6
+            local elemIdx  = 3
+            local y = 6
+
+            self._btnBgElements = {}
+            self._buttonFrames  = {}
+
+            for i, wd in ipairs(winData) do
+                local winId = wd.winId
+
+                -- Button background
+                self.sidebarCanvas:appendElements({
+                    type = "rectangle",
+                    frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
+                    fillColor = color(wd.btnColor),
+                    strokeWidth = 0,
+                    roundedRectRadii = { xRadius = 4, yRadius = 4 },
+                })
+                local map = { bg = elemIdx }
+                elemIdx = elemIdx + 1
+
+                -- ── Line 1: custom rename → hostname → "Window N" fallback ──
                 self.sidebarCanvas:appendElements({
                     type          = "text",
-                    frame         = { x = textX, y = y + 22, w = textW, h = 13 },
-                    text          = base,
-                    textColor     = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
-                    textSize      = 10,
+                    frame         = { x = textX, y = y + 5, w = textW, h = 15 },
+                    text          = wd.label,
+                    textColor     = color(cfg.textColor),
+                    textSize      = 11,
                     textAlignment = "left",
                 })
-                map.line2 = elemIdx
+                map.line1 = elemIdx
                 elemIdx = elemIdx + 1
-            end
 
-            -- ── Line 3: git branch ──
-            local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
-            if branch then
-                self.sidebarCanvas:appendElements({
-                    type          = "text",
-                    frame         = { x = textX, y = y + 38, w = textW, h = 13 },
-                    text          = "⎇ " .. branch,
-                    textColor     = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
-                    textSize      = 10,
-                    textAlignment = "left",
-                })
-                map.line3 = elemIdx
-                elemIdx = elemIdx + 1
-            end
+                -- ── Line 2: PWD basename ──
+                if wd.basename then
+                    self.sidebarCanvas:appendElements({
+                        type          = "text",
+                        frame         = { x = textX, y = y + 22, w = textW, h = 13 },
+                        text          = wd.basename,
+                        textColor     = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
+                        textSize      = 10,
+                        textAlignment = "left",
+                    })
+                    map.line2 = elemIdx
+                    elemIdx = elemIdx + 1
+                end
 
-            -- ── Line 4: opencode session info ──
-            local ocData
-            if fullPath and self._opencodeData[fullPath] then
-                ocData = self._opencodeData[fullPath]
-            else
-                for _, data in pairs(self._opencodeData or {}) do
-                    if data.title and rawTitle:find(data.title, 1, true) then
-                        ocData = data
-                        break
+                -- ── Line 3: git branch ──
+                if wd.branch then
+                    self.sidebarCanvas:appendElements({
+                        type          = "text",
+                        frame         = { x = textX, y = y + 38, w = textW, h = 13 },
+                        text          = "⎇ " .. wd.branch,
+                        textColor     = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
+                        textSize      = 10,
+                        textAlignment = "left",
+                    })
+                    map.line3 = elemIdx
+                    elemIdx = elemIdx + 1
+                end
+
+                -- ── Line 4: opencode session info ──
+                if wd.ocData then
+                    local modelStr = shortModelName(wd.ocData.modelID) or ""
+                    local agentStr = wd.ocData.agent or ""
+                    local tokStr = ""
+                    if wd.ocData.tokensIn and wd.ocData.tokensIn > 0 then
+                        tokStr = fmtTokens(wd.ocData.tokensIn) .. " in"
+                        if wd.ocData.tokensOut and wd.ocData.tokensOut > 0 then
+                            tokStr = tokStr .. " · " .. fmtTokens(wd.ocData.tokensOut) .. " out"
+                        end
                     end
+                    local segments = {}
+                    if modelStr ~= "" then table.insert(segments, modelStr) end
+                    if agentStr ~= "" then table.insert(segments, agentStr) end
+                    if tokStr ~= "" then table.insert(segments, tokStr) end
+                    local ocText = table.concat(segments, "  ")
+                    self.sidebarCanvas:appendElements({
+                        type          = "text",
+                        frame         = { x = textX, y = y + 53, w = textW, h = 12 },
+                        text          = ocText,
+                        textColor     = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
+                        textSize      = 9,
+                        textAlignment = "left",
+                    })
+                    map.line4 = elemIdx
+                    elemIdx = elemIdx + 1
                 end
-            end
-            if ocData then
-                local modelStr = shortModelName(ocData.modelID) or ""
-                local agentStr = ocData.agent or ""
-                local tokStr = ""
-                if ocData.tokensIn and ocData.tokensIn > 0 then
-                    tokStr = fmtTokens(ocData.tokensIn) .. " in"
-                    if ocData.tokensOut and ocData.tokensOut > 0 then
-                        tokStr = tokStr .. " · " .. fmtTokens(ocData.tokensOut) .. " out"
+
+                -- ── Line 5: Claude Code session info (read directly from _ccCache) ──
+                if wd.ccData then
+                    local modelShort = shortModelName(wd.ccData.model) or ""
+                    local tokStr = ""
+                    if wd.ccData.tokensIn > 0 then
+                        tokStr = fmtTokens(wd.ccData.tokensIn) .. "▲ " .. fmtTokens(wd.ccData.tokensOut) .. "▼"
                     end
+                    local pr = self._ghAvailable and getOpenPRForWindow(wd.win) or nil
+                    local prStr = pr and ("#" .. pr.number) or ""
+                    local segments = {}
+                    if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
+                    if tokStr     ~= "" then table.insert(segments, tokStr) end
+                    if prStr      ~= "" then table.insert(segments, prStr) end
+                    local ccText = table.concat(segments, "  ")
+                    self.sidebarCanvas:appendElements({
+                        type          = "text",
+                        frame         = { x = textX, y = y + 68, w = textW, h = 12 },
+                        text          = ccText,
+                        textColor     = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
+                        textSize      = 9,
+                        textAlignment = "left",
+                    })
+                    map.line5 = elemIdx
+                    elemIdx = elemIdx + 1
                 end
-                local segments = {}
-                if modelStr ~= "" then table.insert(segments, modelStr) end
-                if agentStr ~= "" then table.insert(segments, agentStr) end
-                if tokStr ~= "" then table.insert(segments, tokStr) end
-                local ocText = table.concat(segments, "  ")
-                self.sidebarCanvas:appendElements({
-                    type          = "text",
-                    frame         = { x = textX, y = y + 53, w = textW, h = 12 },
-                    text          = ocText,
-                    textColor     = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
-                    textSize      = 9,
-                    textAlignment = "left",
-                })
-                map.line4 = elemIdx
-                elemIdx = elemIdx + 1
-            end
 
-            -- ── Line 5: Claude Code session info (read directly from _ccCache) ──
-            local ccData = _ccCache[winId]
-            if ccData then
-                local modelShort = shortModelName(ccData.model) or ""
-                local tokStr = ""
-                if ccData.tokensIn > 0 then
-                    tokStr = fmtTokens(ccData.tokensIn) .. "▲ " .. fmtTokens(ccData.tokensOut) .. "▼"
-                end
-                local pr = self._ghAvailable and getOpenPRForWindow(win) or nil
-                local prStr = pr and ("#" .. pr.number) or ""
-                local segments = {}
-                if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
-                if tokStr     ~= "" then table.insert(segments, tokStr) end
-                if prStr      ~= "" then table.insert(segments, prStr) end
-                local ccText = table.concat(segments, "  ")
-                self.sidebarCanvas:appendElements({
-                    type          = "text",
-                    frame         = { x = textX, y = y + 68, w = textW, h = 12 },
-                    text          = ccText,
-                    textColor     = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
-                    textSize      = 9,
-                    textAlignment = "left",
-                })
-                map.line5 = elemIdx
-                elemIdx = elemIdx + 1
-            end
-
-            if needsFullRebuild then
                 self._elementMap[winId] = map
+                self._btnStructureKeys[winId] = wd.bKey
+                self._btnBgElements[winId] = map.bg
+
+                if self.config.debug then
+                    hs.printf("elementMap[%d]: bg=%s l1=%s l2=%s l3=%s l4=%s l5=%s",
+                        winId,
+                        tostring(map.bg), tostring(map.line1), tostring(map.line2),
+                        tostring(map.line3), tostring(map.line4), tostring(map.line5))
+                end
+
+                self._buttonFrames[i] = {
+                    x = cfg.padding, y = y,
+                    w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
+                    windowId = winId,
+                }
+                y = y + cfg.windowButtonHeight + 4
             end
-            self._btnBgElements[winId] = map.bg
 
-            if self.config.debug then
-                hs.printf("elementMap[%d]: bg=%s l1=%s l2=%s l3=%s l4=%s l5=%s",
-                    winId,
-                    tostring(map.bg), tostring(map.line1), tostring(map.line2),
-                    tostring(map.line3), tostring(map.line4), tostring(map.line5))
+            self._pendingSidebarFrame = nil
+            if needsFullRebuild then
+                self.sidebarCanvas:show()
             end
+        else
+            -- ── In-place update path: elementAttribute calls only ──
+            self._buttonFrames = {}
+            local y = 6
+            for i, wd in ipairs(winData) do
+                local winId = wd.winId
+                local map   = self._elementMap[winId]
+                if map then
+                    self.sidebarCanvas:elementAttribute(map.bg, "fillColor", color(wd.btnColor))
+                    self.sidebarCanvas:elementAttribute(map.line1, "text", wd.label)
+                    if map.line2 then
+                        local baseText = wd.basename or ""
+                        self.sidebarCanvas:elementAttribute(map.line2, "text", baseText)
+                    end
+                    if map.line3 then
+                        local branchText = wd.branch and ("⎇ " .. wd.branch) or ""
+                        self.sidebarCanvas:elementAttribute(map.line3, "text", branchText)
+                    end
+                    if map.line4 then
+                        local ocText = ""
+                        if wd.ocData then
+                            local modelStr = shortModelName(wd.ocData.modelID) or ""
+                            local agentStr = wd.ocData.agent or ""
+                            local tokStr = ""
+                            if wd.ocData.tokensIn and wd.ocData.tokensIn > 0 then
+                                tokStr = fmtTokens(wd.ocData.tokensIn) .. " in"
+                                if wd.ocData.tokensOut and wd.ocData.tokensOut > 0 then
+                                    tokStr = tokStr .. " · " .. fmtTokens(wd.ocData.tokensOut) .. " out"
+                                end
+                            end
+                            local segments = {}
+                            if modelStr ~= "" then table.insert(segments, modelStr) end
+                            if agentStr ~= "" then table.insert(segments, agentStr) end
+                            if tokStr ~= "" then table.insert(segments, tokStr) end
+                            ocText = table.concat(segments, "  ")
+                        end
+                        self.sidebarCanvas:elementAttribute(map.line4, "text", ocText)
+                    end
+                    if map.line5 then
+                        local ccText = ""
+                        if wd.ccData then
+                            local modelShort = shortModelName(wd.ccData.model) or ""
+                            local tokStr = ""
+                            if wd.ccData.tokensIn > 0 then
+                                tokStr = fmtTokens(wd.ccData.tokensIn) .. "▲ " .. fmtTokens(wd.ccData.tokensOut) .. "▼"
+                            end
+                            local win = hs.window.get(winId)
+                            local pr = win and self._ghAvailable and getOpenPRForWindow(win) or nil
+                            local prStr = pr and ("#" .. pr.number) or ""
+                            local segments = {}
+                            if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
+                            if tokStr     ~= "" then table.insert(segments, tokStr) end
+                            if prStr      ~= "" then table.insert(segments, prStr) end
+                            ccText = table.concat(segments, "  ")
+                        end
+                        self.sidebarCanvas:elementAttribute(map.line5, "text", ccText)
+                    end
+                end
 
-            self._buttonFrames[i] = {
-                x = cfg.padding, y = y,
-                w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
-                windowId = winId,
-            }
-            y = y + cfg.windowButtonHeight + 4
-        end
-
-        self._pendingSidebarFrame = nil
-        if needsFullRebuild then
-            self.sidebarCanvas:show()
+                self._buttonFrames[i] = {
+                    x = cfg.padding, y = y,
+                    w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight,
+                    windowId = winId,
+                }
+                y = y + cfg.windowButtonHeight + 4
+            end
+            self._pendingSidebarFrame = nil
         end
     end)
 
@@ -1592,6 +1689,7 @@ function obj:stop()
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     self._elementMap          = {}
+    self._btnStructureKeys   = {}
     self._lastSidebarSnapshot = nil
     self._lastStructureSnapshot = nil
     return self
@@ -1622,6 +1720,7 @@ function obj:init()
     self._ghAvailable         = false
     self._btnBgElements       = {}
     self._elementMap          = {}
+    self._btnStructureKeys   = {}
     self._lastSidebarSnapshot = nil
     self._lastStructureSnapshot = nil
      _gitBranchCache   = {}
