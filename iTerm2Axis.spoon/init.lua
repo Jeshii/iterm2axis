@@ -287,7 +287,8 @@ local function startFlashing(winId, flashType)
     _flashingWindows[winId] = true
 
     if not _sharedFlashTimer then
-        _sharedFlashTimer = hs.timer.new(obj.config.claudecode.flashInterval, function()
+        local interval = (flashType == "bell") and obj.config.bell.flashInterval or obj.config.claudecode.flashInterval
+        _sharedFlashTimer = hs.timer.new(interval, function()
             for wid in pairs(_flashingWindows) do
                 _flashState[wid] = not _flashState[wid]
                 local bgIdx = obj._btnBgElements[wid]
@@ -1717,7 +1718,7 @@ function obj:start()
                 stopFlashing(id)
             end
         end
-        if not isCCStateChange then
+        if not isCCStateChange or isBellStateChange then
             hs.timer.doAfter(0.1, function() self:buildSidebar() end)
         end
     end)
