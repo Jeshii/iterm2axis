@@ -218,7 +218,8 @@ local function getGitBranchForPath(path, winId)
 end
 
 -- Per-window Claude Code flash state for ✳ waiting indicator.
-local _flashTimers      = {}
+local _sharedFlashTimer  = nil   -- single hs.timer instance
+local _flashingWindows   = {}    -- { [winId] = true } set of active windows
 local _flashState       = {}
 local _flashNormalColor = {}
 
@@ -236,27 +237,34 @@ local function claudeState(win)
 end
 
 local function startFlashing(winId)
-    if _flashTimers[winId] then return end
+    if _flashingWindows[winId] then return end
+    _flashingWindows[winId] = true
     _flashState[winId] = true
     local isActive = (winId == obj.activeWindowId)
     _flashNormalColor[winId] = isActive and obj.config.activeButtonColor or obj.config.buttonColor
-    _flashTimers[winId] = hs.timer.new(obj.config.claudecode.flashInterval, function()
-        _flashState[winId] = not _flashState[winId]
-        local bgIdx = obj._btnBgElements[winId]
-        if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
-            local newColor = _flashState[winId]
-                and { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
-                or _flashNormalColor[winId]
-            obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
-        end
-    end)
-    _flashTimers[winId]:start()
+
+    if not _sharedFlashTimer then
+        _sharedFlashTimer = hs.timer.new(obj.config.claudecode.flashInterval, function()
+            for wid, _ in pairs(_flashingWindows) do
+                _flashState[wid] = not _flashState[wid]
+                local bgIdx = obj._btnBgElements[wid]
+                if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+                    local newColor = _flashState[wid]
+                        and { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+                        or _flashNormalColor[wid]
+                    obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
+                end
+            end
+        end)
+        _sharedFlashTimer:start()
+    end
 end
 
 local function stopFlashing(winId)
-    if _flashTimers[winId] then
-        _flashTimers[winId]:stop()
-        _flashTimers[winId] = nil
+    _flashingWindows[winId] = nil
+    if not next(_flashingWindows) and _sharedFlashTimer then
+        _sharedFlashTimer:stop()
+        _sharedFlashTimer = nil
     end
     _flashState[winId] = nil
     local normalColor = _flashNormalColor[winId]
@@ -1680,10 +1688,10 @@ function obj:stop()
      _prPending       = {}
      _wdCache         = {}
      _wdFlight        = {}
-     for _, t in pairs(_flashTimers) do t:stop() end
-     _flashTimers = {}
-     _flashState  = {}
-     _flashNormalColor = {}
+     if _sharedFlashTimer then _sharedFlashTimer:stop(); _sharedFlashTimer = nil end
+     _flashingWindows   = {}
+     _flashState        = {}
+     _flashNormalColor  = {}
      _ccCache   = {}
      _ccPending = {}
      _ccPathKey = {}
@@ -1732,9 +1740,10 @@ function obj:init()
      _prPending        = {}
      _wdCache          = {}
      _wdFlight         = {}
-     _flashTimers      = {}
-     _flashState       = {}
-     _flashNormalColor = {}
+     _sharedFlashTimer  = nil
+     _flashingWindows   = {}
+     _flashState        = {}
+     _flashNormalColor  = {}
      _ccCache   = {}
      _ccPending = {}
      _ccPathKey = {}
