@@ -510,9 +510,9 @@ function obj:fetchClaudeCodeData()
     end
 
     for _, win in ipairs(wins) do
-        local fullPath = _wdCache[win:id()]
+        -- Phase 3 fix #5: use getWindowWorkingDir to trigger async fetch if cold
+        local fullPath = getWindowWorkingDir(win)
         if not fullPath then
-            getWindowWorkingDir(win)
             oneDone()
         else
             fetchClaudeCodeForWindow(win, fullPath, oneDone)
@@ -600,7 +600,15 @@ local function ocSnippet(data, fullPath)
     return tostring(d.tokensIn or 0) .. "/" .. tostring(d.tokensOut or 0)
 end
 
-local function sidebarStateSnapshot(wins, activeId, opencodeData, claudeCodeData)
+-- Phase 3 fix #3: snapshot reads _ccCache[id] directly per-window so it
+-- reflects the latest async fetch rather than the batched _claudeCodeData table.
+local function ccSnippet(winId)
+    local d = _ccCache[winId]
+    if not d then return "" end
+    return tostring(d.tokensIn or 0) .. "/" .. tostring(d.tokensOut or 0)
+end
+
+local function sidebarStateSnapshot(wins, activeId, opencodeData)
     local parts = {}
     for _, win in ipairs(wins) do
         local id = win:id()
@@ -613,18 +621,31 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData, claudeCodeData
             tostring(fullPath),
             tostring(_gitBranchCache[id] or ""),
             ocSnippet(opencodeData, fullPath),
-            ocSnippet(claudeCodeData, fullPath),
+            ccSnippet(id),
         }, "\t"))
     end
     return table.concat(parts, "|")
 end
 
 function obj:buildSidebar()
+    -- Phase 3 fix #4: debounce rapid back-to-back calls (e.g. multiple async
+    -- callbacks firing in the same event loop tick).
+    if self._buildDebounceTimer then
+        self._buildDebounceTimer:stop()
+        self._buildDebounceTimer = nil
+    end
+    self._buildDebounceTimer = hs.timer.doAfter(0.05, function()
+        self._buildDebounceTimer = nil
+        self:_doBuildSidebar()
+    end)
+end
+
+function obj:_doBuildSidebar()
     if self._buildPending then return end
     self._buildPending = true
 
     local wins = getITermWindows()
-    local snap = sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData, self._claudeCodeData)
+    local snap = sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData)
     if snap == self._lastSidebarSnapshot then
         self._buildPending = false
         return
@@ -809,8 +830,8 @@ function obj:buildSidebar()
                 elemIdx = elemIdx + 1
             end
 
-            -- ── Line 5: Claude Code session info ──
-            local ccData = fullPath and self._claudeCodeData and self._claudeCodeData[fullPath]
+            -- ── Line 5: Claude Code session info (read directly from _ccCache) ──
+            local ccData = _ccCache[winId]
             if ccData then
                 local modelShort = shortModelName(ccData.model) or ""
                 local tokStr = ""
@@ -874,7 +895,7 @@ end
 function obj:bringWindowToFront(windowId)
     local win = hs.window.get(windowId)
     if not win then return end
-    stopFlashing(windowId)        -- ← add this before focus
+    stopFlashing(windowId)
     self.activeWindowId = windowId
     win:raise()
     win:focus()
@@ -1424,9 +1445,9 @@ function obj:start()
             local title = win:title() or ""
             isCCStateChange = title:match("^✳") or title:match("^·")
             if not isCCStateChange then
-                _wdCache[id] = nil
-                _ccCache[id] = nil
-                _ccPathKey[id] = nil
+                _wdCache[id]        = nil
+                _ccCache[id]        = nil
+                _ccPathKey[id]      = nil
                 _gitBranchCache[id] = nil
             end
             local focusedWin = hs.window.focusedWindow()
@@ -1457,6 +1478,9 @@ function obj:start()
 
     for _, win in ipairs(getITermWindows()) do
         self:watchWindow(win)
+        -- Phase 3 fix #1: bootstrap WD fetch on cold start so git/cc data
+        -- is available as soon as the async AppleScript returns.
+        getWindowWorkingDir(win)
     end
 
     if self._screenWatcher then self._screenWatcher:stop() end
@@ -1500,6 +1524,7 @@ function obj:stop()
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
     if self._tipCanvas    then self._tipCanvas:delete();    self._tipCanvas    = nil end
     if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
+    if self._buildDebounceTimer then self._buildDebounceTimer:stop(); self._buildDebounceTimer = nil end
      _gitBranchCache   = {}
      _gitBranchPending = {}
      _prCache         = {}
@@ -1526,8 +1551,9 @@ function obj:init()
     self.activeWindowId = nil
     self._currentScreen = nil
     self._buttonFrames  = {}
-    self._resizeDebounceTimer = nil
-    self._pendingSidebarFrame = nil
+    self._resizeDebounceTimer  = nil
+    self._buildDebounceTimer   = nil
+    self._pendingSidebarFrame  = nil
     self._mouseTap       = nil
     self._winWatcher     = nil
     self._screenWatcher  = nil
