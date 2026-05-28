@@ -1126,8 +1126,11 @@ function obj:bringWindowToFront(windowId)
     if not win then return end
     stopFlashing(windowId)
     self.activeWindowId = windowId
-    win:raise()
-    win:focus()
+    local ok = pcall(function()
+        win:raise()
+        win:focus()
+    end)
+    if not ok then return end
     self:buildSidebar()
 end
 
