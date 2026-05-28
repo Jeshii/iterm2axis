@@ -690,6 +690,7 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData)
         table.insert(parts, table.concat({
             tostring(id),
             win:title() or "",
+            tostring(obj._customNames and obj._customNames[id] or ""),
             tostring(id == activeId),
             tostring(_flashState[id] or false),
             tostring(claudeState(win) or ""),
