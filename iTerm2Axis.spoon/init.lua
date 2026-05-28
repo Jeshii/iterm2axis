@@ -1145,8 +1145,10 @@ function obj:renameWindow(windowId)
             self._customNamesByPath[fullPath] = input
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
         end
-        self._lastSidebarSnapshot = nil
-        self:buildSidebar()
+        hs.timer.doAfter(0.05, function()
+            self._lastSidebarSnapshot = nil
+            self:buildSidebar()
+        end)
     elseif button == "Rename" and (not input or input == "") then
         self._customNames[windowId] = nil
         hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
@@ -1155,8 +1157,10 @@ function obj:renameWindow(windowId)
             self._customNamesByPath[fullPath] = nil
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
         end
-        self._lastSidebarSnapshot = nil
-        self:buildSidebar()
+        hs.timer.doAfter(0.05, function()
+            self._lastSidebarSnapshot = nil
+            self:buildSidebar()
+        end)
     end
 end
 
