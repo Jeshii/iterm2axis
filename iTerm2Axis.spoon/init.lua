@@ -42,6 +42,12 @@ obj.config = {
         flashInterval = 2.0,
         projectsDir   = os.getenv("HOME") .. "/.claude/projects",
     },
+
+    bell = {
+        enabled       = true,
+        flashInterval = 2.0,
+        flashColor    = { red = 0.95, green = 0.85, blue = 0.4, alpha = 0.85 },
+    },
 }
 
 -- ─────────────────────────────────────────────
@@ -254,6 +260,7 @@ local _sharedFlashTimer  = nil   -- single hs.timer instance
 local _flashingWindows   = {}    -- { [winId] = true } set of active windows
 local _flashState       = {}
 local _flashNormalColor = {}
+local _flashType        = {}
 
 -- Per-window Claude Code data cache, keyed by windowId.
 -- Uses hs.task for async .jsonl reads so buildSidebar never blocks.
@@ -263,13 +270,17 @@ local _ccPathKey = {}  -- [winId] = fullPath last fetched (invalidation key)
 
 local function claudeState(win)
     local title = win:title() or ""
-    if title:match("^✳") then return "waiting" end
-    if title:match("^·")  then return "busy"    end
+    local stripped = title:gsub("^🔔", "")
+    if stripped:match("^✳") then return "waiting" end
+    if stripped:match("^·")  then return "busy"    end
+    if title:match("^🔔") then return "bell" end
     return nil
 end
 
-local function startFlashing(winId)
+local function startFlashing(winId, flashType)
     if _flashingWindows[winId] then return end
+    flashType = flashType or "waiting"
+    _flashType[winId] = flashType
     _flashState[winId] = true
     local isActive = (winId == obj.activeWindowId)
     _flashNormalColor[winId] = isActive and obj.config.activeButtonColor or obj.config.buttonColor
@@ -282,8 +293,11 @@ local function startFlashing(winId)
                 local bgIdx = obj._btnBgElements[wid]
                 if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
                     local normalCol = _flashNormalColor[wid]
+                    local flashColor = (_flashType[wid] == "bell")
+                        and obj.config.bell.flashColor
+                        or { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
                     local newColor = _flashState[wid]
-                        and { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+                        and flashColor
                         or (normalCol and color(normalCol) or color(obj.config.buttonColor))
                     obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
                 end
@@ -296,6 +310,7 @@ end
 local function stopFlashing(winId)
     _flashingWindows[winId] = nil
     _flashState[winId] = nil
+    _flashType[winId] = nil
     local normalColor = _flashNormalColor[winId]
     _flashNormalColor[winId] = nil
 
@@ -676,6 +691,7 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData)
             win:title() or "",
             tostring(id == activeId),
             tostring(_flashState[id] or false),
+            tostring(claudeState(win) or ""),
             tostring(fullPath),
             tostring(_gitBranchCache[id] or ""),
             ocSnippet(opencodeData, fullPath),
@@ -763,6 +779,8 @@ function obj:_doBuildSidebar()
         local isFocused  = focusedWin and focusedWin:id() == winId
         if state == "waiting" and _flashState[winId] and not isFocused then
             btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+        elseif state == "bell" and _flashState[winId] and not isFocused then
+            btnColor = cfg.bell.flashColor
         elseif state == "busy" then
             btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
         elseif isActive then
@@ -1675,11 +1693,14 @@ function obj:start()
     end)
     self._winWatcher:subscribe("windowTitleChanged", function(win)
         local isCCStateChange
+        local isBellStateChange
         if win then
             local id = win:id()
             local title = win:title() or ""
-            isCCStateChange = title:match("^✳") or title:match("^·")
-            if not isCCStateChange then
+            local stripped = title:gsub("^🔔", "")
+            isCCStateChange = stripped:match("^✳") or stripped:match("^·")
+            isBellStateChange = title:match("^🔔")
+            if not isCCStateChange and not isBellStateChange then
                 _wdCache[id]        = nil
                 _ccCache[id]        = nil
                 _ccPathKey[id]      = nil
@@ -1690,6 +1711,8 @@ function obj:start()
             local state = claudeState(win)
             if state == "waiting" and not isFocused then
                 startFlashing(id)
+            elseif state == "bell" and not isFocused then
+                startFlashing(id, "bell")
             else
                 stopFlashing(id)
             end
@@ -1844,6 +1867,7 @@ function obj:stop()
      _flashingWindows   = {}
      _flashState        = {}
      _flashNormalColor  = {}
+     _flashType         = {}
      _ccCache   = {}
      _ccPending = {}
      _ccPathKey = {}
@@ -1898,6 +1922,7 @@ function obj:init()
      _flashingWindows   = {}
      _flashState        = {}
      _flashNormalColor  = {}
+     _flashType         = {}
      _ccCache   = {}
      _ccPending = {}
      _ccPathKey = {}
