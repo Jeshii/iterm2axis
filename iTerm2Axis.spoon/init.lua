@@ -805,6 +805,7 @@ function obj:_doBuildSidebar()
         local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
         local label = self._customNames[winId]
             or parts.host
+            or basename
             or ("Window " .. i)
 
         local ocData
