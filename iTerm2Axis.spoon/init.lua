@@ -63,8 +63,18 @@ function obj:debugTitles()
         -- Check Claude Code dir
         if parts.fullPath then
             local ccDir = claudeProjectDir(parts.fullPath)
-            local ls = hs.execute("ls '" .. ccDir .. "' 2>&1 | head -3")
-            hs.printf("  claudeDir=%s => %s", ccDir, ls:gsub("\n", " | "))
+            local files = {}
+            local ok, iter, dirObj = pcall(hs.fs.dir, ccDir)
+            if ok then
+                for _ = 1, 3 do
+                    local f = iter(dirObj)
+                    if not f then break end
+                    table.insert(files, f)
+                end
+                iter(dirObj)
+            end
+            local display = #files > 0 and table.concat(files, ", ") or "(empty)"
+            hs.printf("  claudeDir=%s => %s", ccDir, display)
         end
         -- Check opencode match
         if obj._opencodeData then
