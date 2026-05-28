@@ -1802,7 +1802,7 @@ function obj:start()
     end
 
     -- Deferred re-apply of path-keyed names once async WD fetches have settled
-    hs.timer.doAfter(3, function()
+    local function reapplyPathNames()
         if not savedNamesByPath then return end
         local liveWins = getITermWindows()
         local needsRebuild = false
@@ -1815,9 +1815,12 @@ function obj:start()
             end
         end
         if needsRebuild and self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self._lastSidebarSnapshot = nil
             self:buildSidebar()
         end
-    end)
+    end
+    hs.timer.doAfter(10, reapplyPathNames)
+    hs.timer.doAfter(30, reapplyPathNames)
 
     if self._screenWatcher then self._screenWatcher:stop() end
     self._screenWatcher = hs.screen.watcher.new(function()
