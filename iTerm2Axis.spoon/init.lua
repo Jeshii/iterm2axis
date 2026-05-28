@@ -1277,15 +1277,13 @@ function obj:start()
         {
             hs.eventtap.event.types.leftMouseDown,
             hs.eventtap.event.types.rightMouseDown,
-            hs.eventtap.event.types.leftMouseDragged,
-            hs.eventtap.event.types.leftMouseUp,
         },
         function(event)
-            local eventType = event:getType()
-            local mouse     = hs.mouse.absolutePosition()
-
             if not self.sidebarCanvas then return false end
+
+            local eventType = event:getType()
             local sf = self.sidebarCanvas:frame()
+            local mouse = hs.mouse.absolutePosition()
 
             local inSidebar = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
                 and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
@@ -1366,10 +1364,6 @@ function obj:start()
         self:handleWindowMoveOrResize()
     end)
     self._winWatcher:subscribe("windowFocused", function(win)
-        if self._mouseTap then
-            self._mouseTap:stop()
-            self._mouseTap:start()
-        end
         if win and isITerm(win) then
             self.activeWindowId = win:id()
             stopFlashing(win:id())
