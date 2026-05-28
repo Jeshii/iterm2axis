@@ -212,11 +212,22 @@ local function getGitBranchForPath(path, winId)
     _gitBranchPending[winId] = true
 
     hs.task.new("/usr/bin/git", function(_, stdout, _)
-        _gitBranchPending[winId] = nil
         local branch = stdout and stdout:gsub("%s+$", "")
         if not branch or branch == "" or branch == "HEAD" then
-            branch = hs.execute("git -C '" .. path .. "' worktree list --porcelain 2>/dev/null | grep 'branch' | head -1 | sed 's/branch refs\\/heads\\///'"):gsub("%s+$", "")
+            -- Chained fallback for detached HEAD / worktree (async, non-blocking)
+            hs.task.new("/bin/sh", function(_, out, _)
+                _gitBranchPending[winId] = nil
+                local b = out and out:gsub("%s+$", "")
+                _gitBranchCache[winId] = (b and b ~= "") and b or false
+                hs.timer.doAfter(0, function()
+                    if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+                        obj:buildSidebar()
+                    end
+                end)
+            end, {"-c", "git -C '" .. path .. "' worktree list --porcelain 2>/dev/null | grep 'branch' | head -1 | sed 's/branch refs\\/heads\\///'"}):start()
+            return
         end
+        _gitBranchPending[winId] = nil
         _gitBranchCache[winId] = (branch and branch ~= "") and branch or false
         hs.timer.doAfter(0, function()
             if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
