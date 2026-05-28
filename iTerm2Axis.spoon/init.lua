@@ -550,9 +550,41 @@ end
 -- Sidebar
 -- ─────────────────────────────────────────────
 
+local function ocSnippet(data, fullPath)
+    if not data or not fullPath or not data[fullPath] then return "" end
+    local d = data[fullPath]
+    return tostring(d.tokensIn or 0) .. "/" .. tostring(d.tokensOut or 0)
+end
+
+local function sidebarStateSnapshot(wins, activeId, opencodeData, claudeCodeData)
+    local parts = {}
+    for _, win in ipairs(wins) do
+        local id = win:id()
+        local fullPath = _wdCache[id] or ""
+        table.insert(parts, table.concat({
+            tostring(id),
+            win:title() or "",
+            tostring(id == activeId),
+            tostring(_flashState[id] or false),
+            tostring(fullPath),
+            ocSnippet(opencodeData, fullPath),
+            ocSnippet(claudeCodeData, fullPath),
+        }, "\t"))
+    end
+    return table.concat(parts, "|")
+end
+
 function obj:buildSidebar()
     if self._buildPending then return end
     self._buildPending = true
+
+    local wins = getITermWindows()
+    local snap = sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData, self._claudeCodeData)
+    if snap == self._lastSidebarSnapshot then
+        self._buildPending = false
+        return
+    end
+    self._lastSidebarSnapshot = snap
 
     local ok, err = pcall(function()
         if self.sidebarCanvas then
@@ -589,7 +621,7 @@ function obj:buildSidebar()
         })
 
         -- Window buttons
-        local itermWins = getITermWindows()
+        local itermWins = wins
         local y = 6
         self._buttonFrames = {}
 
@@ -1431,6 +1463,7 @@ function obj:stop()
      _flashNormalColor = {}
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
+    self._lastSidebarSnapshot = nil
     return self
 end
 
@@ -1456,6 +1489,7 @@ function obj:init()
     self._claudeCodePollTimer = nil
     self._ghAvailable         = false
     self._btnBgElements       = {}
+    self._lastSidebarSnapshot = nil
      _gitBranchCache   = {}
      _gitBranchPending = {}
      _prCache          = {}
