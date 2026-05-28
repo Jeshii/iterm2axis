@@ -15,6 +15,9 @@ obj.author   = "Jesse Fuller"
 obj.license  = "MIT - https://opensource.org/licenses/MIT"
 obj.homepage = "https://github.com/Jeshii/iterm2axis"
 
+local SETTINGS_KEY_ORDER = "iTerm2Axis.orderedWindowIds"
+local SETTINGS_KEY_NAMES = "iTerm2Axis.customNames"
+
 obj.config = {
     debug             = false,
     sidebarWidth      = 200,
@@ -1087,9 +1090,11 @@ function obj:renameWindow(windowId)
     )
     if button == "Rename" and input and input ~= "" then
         self._customNames[windowId] = input
+        hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
         self:buildSidebar()
     elseif button == "Rename" and (not input or input == "") then
         self._customNames[windowId] = nil
+        hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
         self:buildSidebar()
     end
 end
@@ -1251,6 +1256,7 @@ function obj:moveWindowById(windowId, direction)
 
     self._orderedWindowIds[currentIdx], self._orderedWindowIds[newIdx] =
         self._orderedWindowIds[newIdx], self._orderedWindowIds[currentIdx]
+    hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
     self._lastStructureSnapshot = nil
     self:buildSidebar()
 end
@@ -1276,6 +1282,7 @@ function obj:moveWindowToExtent(windowId, extent)
 
     table.remove(self._orderedWindowIds, currentIdx)
     table.insert(self._orderedWindowIds, targetIdx, windowId)
+    hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
     self._lastStructureSnapshot = nil
     self:buildSidebar()
 end
@@ -1659,6 +1666,32 @@ function obj:start()
     end)
     self._screenWatcher:start()
 
+    -- Restore persisted order and names
+    local savedOrder = hs.settings.get(SETTINGS_KEY_ORDER)
+    local savedNames = hs.settings.get(SETTINGS_KEY_NAMES)
+
+    if savedOrder then
+        local liveWins = getITermWindows()
+        local liveIds  = {}
+        for _, w in ipairs(liveWins) do liveIds[w:id()] = true end
+        local filtered = {}
+        for _, id in ipairs(savedOrder) do
+            if liveIds[id] then table.insert(filtered, id) end
+        end
+        self._orderedWindowIds = filtered
+    end
+
+    if savedNames then
+        local liveWins = getITermWindows()
+        local liveIds  = {}
+        for _, w in ipairs(liveWins) do liveIds[w:id()] = true end
+        local filtered = {}
+        for id, name in pairs(savedNames) do
+            if liveIds[id] then filtered[id] = name end
+        end
+        self._customNames = filtered
+    end
+
     self:buildSidebar()
     self:tileITermWindows()
 
@@ -1677,6 +1710,8 @@ function obj:start()
 end
 
 function obj:stop()
+    hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
+    hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
     if self._mouseTap      then self._mouseTap:stop();      self._mouseTap      = nil end
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
