@@ -1155,6 +1155,7 @@ function obj:renameWindow(windowId)
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
         else
             self._pendingPathNames[windowId] = input
+            if win then getWindowWorkingDir(win) end
         end
         hs.timer.doAfter(0.05, function()
             self._lastSidebarSnapshot = nil
@@ -1169,6 +1170,7 @@ function obj:renameWindow(windowId)
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
         else
             self._pendingPathNames[windowId] = false
+            if win then getWindowWorkingDir(win) end
         end
         hs.timer.doAfter(0.05, function()
             self._lastSidebarSnapshot = nil
@@ -1865,6 +1867,13 @@ function obj:start()
 end
 
 function obj:stop()
+    -- Flush any pending path-name assignments before clearing caches
+    for winId, pending in pairs(self._pendingPathNames or {}) do
+        local path = _wdCache[winId]
+        if path and pending ~= nil then
+            self._customNamesByPath[path] = pending or nil
+        end
+    end
     if self._orderedWindowIds and next(self._orderedWindowIds) then
         hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
     end
