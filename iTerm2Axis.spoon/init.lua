@@ -1276,12 +1276,23 @@ end
 
 function obj:moveWindowById(windowId, direction)
     if not self._orderedWindowIds then self._orderedWindowIds = {} end
-    if #self._orderedWindowIds == 0 then
-        local wins = getITermWindows()
-        for _, win in ipairs(wins) do
-            table.insert(self._orderedWindowIds, win:id())
+    local wins = getITermWindows()
+    local liveIds = {}
+    for _, win in ipairs(wins) do liveIds[win:id()] = true end
+    local filtered = {}
+    local filteredSet = {}
+    for _, id in ipairs(self._orderedWindowIds) do
+        if liveIds[id] then
+            table.insert(filtered, id)
+            filteredSet[id] = true
         end
     end
+    for _, win in ipairs(wins) do
+        if not filteredSet[win:id()] then
+            table.insert(filtered, win:id())
+        end
+    end
+    self._orderedWindowIds = filtered
     if #self._orderedWindowIds < 2 then return end
 
     local currentIdx
@@ -1302,12 +1313,23 @@ end
 
 function obj:moveWindowToExtent(windowId, extent)
     if not self._orderedWindowIds then self._orderedWindowIds = {} end
-    if #self._orderedWindowIds == 0 then
-        local wins = getITermWindows()
-        for _, win in ipairs(wins) do
-            table.insert(self._orderedWindowIds, win:id())
+    local wins = getITermWindows()
+    local liveIds = {}
+    for _, win in ipairs(wins) do liveIds[win:id()] = true end
+    local filtered = {}
+    local filteredSet = {}
+    for _, id in ipairs(self._orderedWindowIds) do
+        if liveIds[id] then
+            table.insert(filtered, id)
+            filteredSet[id] = true
         end
     end
+    for _, win in ipairs(wins) do
+        if not filteredSet[win:id()] then
+            table.insert(filtered, win:id())
+        end
+    end
+    self._orderedWindowIds = filtered
     if #self._orderedWindowIds < 2 then return end
 
     local currentIdx
@@ -1341,6 +1363,13 @@ function obj:focusNextWindow(direction)
         local filtered = {}
         for _, id in ipairs(self._orderedWindowIds) do
             if liveIds[id] then table.insert(filtered, id) end
+        end
+        local filteredSet = {}
+        for _, id in ipairs(filtered) do filteredSet[id] = true end
+        for _, win in ipairs(wins) do
+            if not filteredSet[win:id()] then
+                table.insert(filtered, win:id())
+            end
         end
         self._orderedWindowIds = filtered
     end
