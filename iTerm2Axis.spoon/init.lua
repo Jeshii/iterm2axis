@@ -335,71 +335,7 @@ local function getOpenPRForWindow(win)
     return _prCache[winId] or nil
 end
 
-function obj:fetchOpenCodeData()
-    local newData = {}
-    local loaded = false
-
-    -- Try HTTP API first (opencode serve)
-    local okHttp, httpResult = pcall(hs.execute, "/usr/bin/curl -s -m 2 http://127.0.0.1:" .. self.config.opencode.port .. "/session 2>/dev/null")
-    if okHttp and httpResult and httpResult ~= "" then
-        local ok, sessions = pcall(hs.json.decode, httpResult)
-        if ok and type(sessions) == "table" then
-            for _, s in ipairs(sessions) do
-                if s.directory then
-                    local existing = newData[s.directory]
-                    if not existing or (s.time_updated or 0) > existing.updated then
-                        local m = {}
-                        if s.model then
-                            local ok2, parsed = pcall(hs.json.decode, s.model)
-                            if ok2 and type(parsed) == "table" then m = parsed end
-                        end
-                        newData[s.directory] = {
-                            title    = s.title,
-                            modelID  = m.id,
-                            provider = m.providerID,
-                            agent    = s.agent,
-                            tokensIn = s.tokens_input or 0,
-                            tokensOut = s.tokens_output or 0,
-                            updated  = s.time_updated or 0,
-                        }
-                    end
-                end
-            end
-            loaded = true
-        end
-    end
-
-    -- Fall back to SQLite database
-    if not loaded then
-        local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
-        local sql = "SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
-        local cmd = "/usr/bin/sqlite3 -json '" .. dbPath .. "' \"" .. sql .. "\" 2>/dev/null"
-        local okDB, dbResult = pcall(hs.execute, cmd)
-        if okDB and dbResult and dbResult ~= "" then
-            local ok, sessions = pcall(hs.json.decode, dbResult)
-            if ok and type(sessions) == "table" then
-                for _, s in ipairs(sessions) do
-                    if s.directory and not newData[s.directory] then
-                        local m = {}
-                        if s.model then
-                            local ok2, parsed = pcall(hs.json.decode, s.model)
-                            if ok2 and type(parsed) == "table" then m = parsed end
-                        end
-                        newData[s.directory] = {
-                            title    = s.title,
-                            modelID  = m.id,
-                            provider = m.providerID,
-                            agent    = s.agent,
-                            tokensIn = s.tokens_input or 0,
-                            tokensOut = s.tokens_output or 0,
-                            updated  = s.time_updated or 0,
-                        }
-                    end
-                end
-            end
-        end
-    end
-
+function obj:_finalizeOpenCodeData(newData)
     local sessionCount = 0
     for _ in pairs(newData) do sessionCount = sessionCount + 1 end
     local matchCount = 0
@@ -411,19 +347,94 @@ function obj:fetchOpenCodeData()
     end
 
     self._opencodeData = newData
+    self._opencodePending = false
+    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+        self:buildSidebar()
+    end
+end
+
+function obj:fetchOpenCodeData()
+    if self._opencodePending then return end
+    self._opencodePending = true
+
+    -- Try HTTP API first (opencode serve)
+    hs.task.new("/usr/bin/curl", function(_, stdout, _)
+        local newData = {}
+
+        if stdout and stdout ~= "" then
+            local ok, sessions = pcall(hs.json.decode, stdout)
+            if ok and type(sessions) == "table" then
+                for _, s in ipairs(sessions) do
+                    if s.directory then
+                        local existing = newData[s.directory]
+                        if not existing or (s.time_updated or 0) > existing.updated then
+                            local m = {}
+                            if s.model then
+                                local ok2, parsed = pcall(hs.json.decode, s.model)
+                                if ok2 and type(parsed) == "table" then m = parsed end
+                            end
+                            newData[s.directory] = {
+                                title    = s.title,
+                                modelID  = m.id,
+                                provider = m.providerID,
+                                agent    = s.agent,
+                                tokensIn = s.tokens_input or 0,
+                                tokensOut = s.tokens_output or 0,
+                                updated  = s.time_updated or 0,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+
+        -- If HTTP returned data, finalize; otherwise try SQLite fallback
+        if next(newData) then
+            self:_finalizeOpenCodeData(newData)
+            return
+        end
+
+        -- Fall back to SQLite database
+        local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
+        local sql = "SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
+
+        hs.task.new("/usr/bin/sqlite3", function(_, dbStdout, _)
+            local newData = {}
+
+            if dbStdout and dbStdout ~= "" then
+                local ok, sessions = pcall(hs.json.decode, dbStdout)
+                if ok and type(sessions) == "table" then
+                    for _, s in ipairs(sessions) do
+                        if s.directory and not newData[s.directory] then
+                            local m = {}
+                            if s.model then
+                                local ok2, parsed = pcall(hs.json.decode, s.model)
+                                if ok2 and type(parsed) == "table" then m = parsed end
+                            end
+                            newData[s.directory] = {
+                                title    = s.title,
+                                modelID  = m.id,
+                                provider = m.providerID,
+                                agent    = s.agent,
+                                tokensIn = s.tokens_input or 0,
+                                tokensOut = s.tokens_output or 0,
+                                updated  = s.time_updated or 0,
+                            }
+                        end
+                    end
+                end
+            end
+
+            self:_finalizeOpenCodeData(newData)
+        end, {"-json", dbPath, sql}):start()
+    end, {"-s", "-m", "2", "http://127.0.0.1:" .. self.config.opencode.port .. "/session"}):start()
 end
 
 function obj:startOpenCodePolling()
     self:fetchOpenCodeData()
-    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-        self:buildSidebar()
-    end
     if self._opencodePollTimer then self._opencodePollTimer:stop() end
     self._opencodePollTimer = hs.timer.new(self.config.opencode.pollInterval, function()
         self:fetchOpenCodeData()
-        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-            self:buildSidebar()
-        end
     end)
     self._opencodePollTimer:start()
 end
@@ -1539,6 +1550,7 @@ function obj:stop()
      _ccCache   = {}
      _ccPending = {}
      _ccPathKey = {}
+     self._opencodePending = false
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     self._lastSidebarSnapshot = nil
@@ -1563,6 +1575,7 @@ function obj:init()
     self._customNames      = {}
     self._orderedWindowIds = {}
     self._opencodeData     = {}
+    self._opencodePending  = false
     self._opencodePollTimer = nil
     self._claudeCodeData      = {}
     self._claudeCodePollTimer = nil
