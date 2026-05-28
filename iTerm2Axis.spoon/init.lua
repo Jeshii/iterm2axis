@@ -639,6 +639,10 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData)
     return table.concat(parts, "|")
 end
 
+local function sidebarStructureSnapshot(wins, sbW, sbH)
+    return #wins .. ":" .. sbW .. "x" .. sbH
+end
+
 function obj:buildSidebar()
     -- Phase 3 fix #4: debounce rapid back-to-back calls (e.g. multiple async
     -- callbacks firing in the same event loop tick).
@@ -664,26 +668,35 @@ function obj:_doBuildSidebar()
     end
     self._lastSidebarSnapshot = snap
 
+    local layout = self:computeLayout()
+    local sb  = layout.sidebar
+    local cfg = self.config
+
+    local structureSnap = sidebarStructureSnapshot(wins, sb.w, sb.h)
+    local needsFullRebuild = (self.sidebarCanvas == nil)
+                          or (structureSnap ~= self._lastStructureSnapshot)
+
     local ok, err = pcall(function()
-        if self.sidebarCanvas then
-            if not self._pendingSidebarFrame then
-                self._pendingSidebarFrame = self.sidebarCanvas:frame()
+        if needsFullRebuild then
+            if self.sidebarCanvas then
+                if not self._pendingSidebarFrame then
+                    self._pendingSidebarFrame = self.sidebarCanvas:frame()
+                end
+                self.sidebarCanvas:delete()
+                self.sidebarCanvas = nil
             end
-            self.sidebarCanvas:delete()
-            self.sidebarCanvas = nil
+
+            self.sidebarCanvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
+            self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+            self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+            self.sidebarCanvas:alpha(1)
+            self._lastStructureSnapshot = structureSnap
+        else
+            self.sidebarCanvas:replaceElements()
         end
 
-        local layout = self:computeLayout()
-        local sb  = layout.sidebar
-        local cfg = self.config
-
-        local canvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
-        canvas:level(hs.canvas.windowLevels.floating)
-        canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
-        canvas:alpha(1)
-
         -- Background
-        canvas:appendElements({
+        self.sidebarCanvas:appendElements({
             type = "rectangle",
             frame = { x = 0, y = 0, w = sb.w, h = sb.h },
             fillColor = color(cfg.sidebarColor),
@@ -691,7 +704,7 @@ function obj:_doBuildSidebar()
         })
 
         -- Right border
-        canvas:appendElements({
+        self.sidebarCanvas:appendElements({
             type = "rectangle",
             frame = { x = sb.w - 1, y = 0, w = 1, h = sb.h },
             fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
@@ -752,7 +765,7 @@ function obj:_doBuildSidebar()
             local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
 
             -- Button background
-            canvas:appendElements({
+            self.sidebarCanvas:appendElements({
                 type = "rectangle",
                 frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
                 fillColor = color(btnColor),
@@ -766,7 +779,7 @@ function obj:_doBuildSidebar()
             local label = self._customNames[winId]
                 or parts.host
                 or ("Window " .. i)
-            canvas:appendElements({
+            self.sidebarCanvas:appendElements({
                 type          = "text",
                 frame         = { x = textX, y = y + 5, w = textW, h = 15 },
                 text          = label,
@@ -779,7 +792,7 @@ function obj:_doBuildSidebar()
             -- ── Line 2: PWD basename ──
             if basename then
                 local base = basename
-                canvas:appendElements({
+                self.sidebarCanvas:appendElements({
                     type          = "text",
                     frame         = { x = textX, y = y + 22, w = textW, h = 13 },
                     text          = base,
@@ -793,7 +806,7 @@ function obj:_doBuildSidebar()
             -- ── Line 3: git branch ──
             local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
             if branch then
-                canvas:appendElements({
+                self.sidebarCanvas:appendElements({
                     type          = "text",
                     frame         = { x = textX, y = y + 38, w = textW, h = 13 },
                     text          = "⎇ " .. branch,
@@ -831,7 +844,7 @@ function obj:_doBuildSidebar()
                 if agentStr ~= "" then table.insert(segments, agentStr) end
                 if tokStr ~= "" then table.insert(segments, tokStr) end
                 local ocText = table.concat(segments, "  ")
-                canvas:appendElements({
+                self.sidebarCanvas:appendElements({
                     type          = "text",
                     frame         = { x = textX, y = y + 53, w = textW, h = 12 },
                     text          = ocText,
@@ -857,7 +870,7 @@ function obj:_doBuildSidebar()
                 if tokStr     ~= "" then table.insert(segments, tokStr) end
                 if prStr      ~= "" then table.insert(segments, prStr) end
                 local ccText = table.concat(segments, "  ")
-                canvas:appendElements({
+                self.sidebarCanvas:appendElements({
                     type          = "text",
                     frame         = { x = textX, y = y + 68, w = textW, h = 12 },
                     text          = ccText,
@@ -876,9 +889,10 @@ function obj:_doBuildSidebar()
             y = y + cfg.windowButtonHeight + 4
         end
 
-        self.sidebarCanvas = canvas
         self._pendingSidebarFrame = nil
-        canvas:show()
+        if needsFullRebuild then
+            self.sidebarCanvas:show()
+        end
     end)
 
     self._buildPending = false
@@ -1107,6 +1121,7 @@ function obj:moveWindowById(windowId, direction)
 
     self._orderedWindowIds[currentIdx], self._orderedWindowIds[newIdx] =
         self._orderedWindowIds[newIdx], self._orderedWindowIds[currentIdx]
+    self._lastStructureSnapshot = nil
     self:buildSidebar()
 end
 
@@ -1131,6 +1146,7 @@ function obj:moveWindowToExtent(windowId, extent)
 
     table.remove(self._orderedWindowIds, currentIdx)
     table.insert(self._orderedWindowIds, targetIdx, windowId)
+    self._lastStructureSnapshot = nil
     self:buildSidebar()
 end
 
@@ -1232,6 +1248,7 @@ function obj:handleWindowMoveOrResize()
                 self.sidebarCanvas:delete()
                 self.sidebarCanvas = nil
             end
+            self._lastStructureSnapshot = nil
             self:buildSidebar()
             self:tileITermWindows()
             return
@@ -1274,6 +1291,7 @@ function obj:handleWindowMoveOrResize()
             local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
             for _, w in ipairs(wins) do w:setFrame(newFrame) end
 
+            self._lastStructureSnapshot = nil
             self:buildSidebar()
         end
     end)
@@ -1322,10 +1340,10 @@ function obj:bindHotkeys(mapping)
         if iterm then
             iterm:activate()
             hs.eventtap.keyStroke({"cmd"}, "n")
-            hs.timer.doAfter(0.5, function() self:buildSidebar(); self:tileITermWindows() end)
+            hs.timer.doAfter(0.5, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
         else
             hs.application.open("com.googlecode.iterm2")
-            hs.timer.doAfter(1.0, function() self:buildSidebar(); self:tileITermWindows() end)
+            hs.timer.doAfter(1.0, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
         end
     end)
 
@@ -1427,7 +1445,7 @@ function obj:start()
     self._winWatcher = hs.window.filter.new("iTerm2")
     self._winWatcher:subscribe("windowCreated", function(win)
         if win then self:watchWindow(win) end
-        hs.timer.doAfter(0.3, function() self:buildSidebar(); self:tileITermWindows() end)
+        hs.timer.doAfter(0.3, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
     end)
     self._winWatcher:subscribe("windowDestroyed", function(win)
         local id = win and win:id()
@@ -1448,7 +1466,7 @@ function obj:start()
             _ccPathKey[id] = nil
             stopFlashing(id)
         end
-        hs.timer.doAfter(0.3, function() self:buildSidebar() end)
+        hs.timer.doAfter(0.3, function() self._lastStructureSnapshot = nil; self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowTitleChanged", function(win)
         local isCCStateChange
@@ -1555,6 +1573,7 @@ function obj:stop()
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
     self._lastSidebarSnapshot = nil
+    self._lastStructureSnapshot = nil
     return self
 end
 
@@ -1583,6 +1602,7 @@ function obj:init()
     self._ghAvailable         = false
     self._btnBgElements       = {}
     self._lastSidebarSnapshot = nil
+    self._lastStructureSnapshot = nil
      _gitBranchCache   = {}
      _gitBranchPending = {}
      _prCache          = {}
