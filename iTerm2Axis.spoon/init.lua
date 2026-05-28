@@ -1740,7 +1740,9 @@ function obj:start()
     self:buildSidebar()
     self:tileITermWindows()
 
-    self._ghAvailable = (hs.execute("which gh 2>/dev/null"):gsub("%s+$", "") ~= "")
+    hs.task.new("/usr/bin/which", function(exitCode, stdout, _)
+        self._ghAvailable = (exitCode == 0 and stdout and stdout:gsub("%s+$", "") ~= "")
+    end, {"gh"}):start()
 
     if self.config.opencode.enabled then
         self:startOpenCodePolling()
