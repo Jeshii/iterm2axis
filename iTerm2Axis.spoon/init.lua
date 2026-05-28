@@ -143,6 +143,10 @@ local function parseTitleComponents(title)
     if h and p then
         host = h
         pathPart = p
+    elseif not h then
+        -- Hostname only (no path suffix) -- e.g. "user@prod-host"
+        h = title:match("^[^@]+@([^:%s]+)%s*$")
+        if h then host = h end
     else
         -- Try bare path (no host prefix)
         pathPart = title:match("^(~?/[^%s].*)$") or title:match("%s(~?/[^%s]+)%s*$")
