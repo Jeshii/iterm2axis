@@ -1522,6 +1522,7 @@ function obj:start()
                 self.sidebarCanvas:delete()
                 self.sidebarCanvas = nil
             end
+            self._lastStructureSnapshot = nil
             self:buildSidebar()
             self:tileITermWindows()
         end)
