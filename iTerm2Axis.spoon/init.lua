@@ -1712,9 +1712,16 @@ function obj:start()
         end
     end)
 
+    -- Load path-keyed names BEFORE triggering async WD fetches, so the
+    -- callback in getWindowWorkingDir finds _customNamesByPath populated.
+    local savedNamesByPath = hs.settings.get(SETTINGS_KEY_NAMES_BY_PATH)
+    if savedNamesByPath then
+        self._customNamesByPath = savedNamesByPath
+    end
+
     for _, win in ipairs(getITermWindows()) do
         self:watchWindow(win)
-        -- Phase 3 fix #1: bootstrap WD fetch on cold start so git/cc data
+        -- bootstrap WD fetch on cold start so git/cc data
         -- is available as soon as the async AppleScript returns.
         getWindowWorkingDir(win)
     end
@@ -1747,10 +1754,8 @@ function obj:start()
         self._customNames = filtered
     end
 
-    -- Apply path-keyed custom names for any window whose WD is already known
-    local savedNamesByPath = hs.settings.get(SETTINGS_KEY_NAMES_BY_PATH)
+    -- Apply path-keyed custom names for any window whose WD resolved synchronously
     if savedNamesByPath then
-        self._customNamesByPath = savedNamesByPath
         local liveWins = getITermWindows()
         for _, w in ipairs(liveWins) do
             local id = w:id()
