@@ -204,9 +204,17 @@ local function getWindowWorkingDir(win)
         _wdCache[winId] = (path and path ~= "") and path or false
         if _wdCache[winId] and obj._customNamesByPath then
             local resolvedPath = _wdCache[winId]
-            if resolvedPath and obj._customNamesByPath[resolvedPath]
-            and not obj._customNames[winId] then
-                obj._customNames[winId] = obj._customNamesByPath[resolvedPath]
+            if resolvedPath then
+                if obj._customNamesByPath[resolvedPath]
+                and not obj._customNames[winId] then
+                    obj._customNames[winId] = obj._customNamesByPath[resolvedPath]
+                end
+                if obj._pendingPathNames and obj._pendingPathNames[winId] ~= nil then
+                    local pending = obj._pendingPathNames[winId]
+                    obj._customNamesByPath[resolvedPath] = pending or nil
+                    hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, obj._customNamesByPath)
+                    obj._pendingPathNames[winId] = nil
+                end
             end
         end
         if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
@@ -1145,6 +1153,8 @@ function obj:renameWindow(windowId)
         if fullPath then
             self._customNamesByPath[fullPath] = input
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
+        else
+            self._pendingPathNames[windowId] = input
         end
         hs.timer.doAfter(0.05, function()
             self._lastSidebarSnapshot = nil
@@ -1157,6 +1167,8 @@ function obj:renameWindow(windowId)
         if fullPath then
             self._customNamesByPath[fullPath] = nil
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
+        else
+            self._pendingPathNames[windowId] = false
         end
         hs.timer.doAfter(0.05, function()
             self._lastSidebarSnapshot = nil
@@ -1760,9 +1772,8 @@ function obj:start()
         getWindowWorkingDir(win)
     end
 
-    -- Restore persisted order and names
+    -- Restore persisted order
     local savedOrder = hs.settings.get(SETTINGS_KEY_ORDER)
-    local savedNames = hs.settings.get(SETTINGS_KEY_NAMES)
 
     if savedOrder then
         local liveWins = getITermWindows()
@@ -1776,18 +1787,6 @@ function obj:start()
         self._orderedWindowIds = filtered
     end
 
-    if savedNames then
-        local liveWins = getITermWindows()
-        local liveIds  = {}
-        for _, w in ipairs(liveWins) do liveIds[w:id()] = true end
-        local filtered = {}
-        for id, name in pairs(savedNames) do
-            local numId = tonumber(id)
-            if numId and liveIds[numId] then filtered[numId] = name end
-        end
-        self._customNames = filtered
-    end
-
     -- Apply path-keyed custom names for any window whose WD resolved synchronously
     if savedNamesByPath then
         local liveWins = getITermWindows()
@@ -1799,6 +1798,24 @@ function obj:start()
             end
         end
     end
+
+    -- Deferred re-apply of path-keyed names once async WD fetches have settled
+    hs.timer.doAfter(3, function()
+        if not savedNamesByPath then return end
+        local liveWins = getITermWindows()
+        local needsRebuild = false
+        for _, w in ipairs(liveWins) do
+            local id = w:id()
+            local path = _wdCache[id]
+            if path and savedNamesByPath[path] and not self._customNames[id] then
+                self._customNames[id] = savedNamesByPath[path]
+                needsRebuild = true
+            end
+        end
+        if needsRebuild and self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            self:buildSidebar()
+        end
+    end)
 
     if self._screenWatcher then self._screenWatcher:stop() end
     self._screenWatcher = hs.screen.watcher.new(function()
@@ -1885,11 +1902,12 @@ function obj:stop()
      self._opencodePending = false
      if self._opencodePollTimer then self._opencodePollTimer:stop(); self._opencodePollTimer = nil end
     if self._claudeCodePollTimer then self._claudeCodePollTimer:stop(); self._claudeCodePollTimer = nil end
-    self._elementMap          = {}
-    self._btnStructureKeys   = {}
-    self._lastSidebarSnapshot = nil
-    self._lastStructureSnapshot = nil
-    return self
+     self._elementMap          = {}
+     self._btnStructureKeys   = {}
+     self._pendingPathNames   = {}
+     self._lastSidebarSnapshot = nil
+     self._lastStructureSnapshot = nil
+     return self
 end
 
 function obj:init()
@@ -1910,6 +1928,7 @@ function obj:init()
     self._windowWatchers   = {}
     self._customNames      = {}
     self._customNamesByPath = {}
+    self._pendingPathNames  = {}
     self._orderedWindowIds = {}
     self._opencodeData     = {}
     self._opencodePending  = false
