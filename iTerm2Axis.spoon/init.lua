@@ -336,16 +336,6 @@ local function getOpenPRForWindow(win)
 end
 
 function obj:_finalizeOpenCodeData(newData)
-    local sessionCount = 0
-    for _ in pairs(newData) do sessionCount = sessionCount + 1 end
-    local matchCount = 0
-    for _, win in ipairs(getITermWindows()) do
-        local fp = getWindowWorkingDir(win)
-        if fp and newData[fp] then
-            matchCount = matchCount + 1
-        end
-    end
-
     self._opencodeData = newData
     self._opencodePending = false
     if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
@@ -358,76 +348,87 @@ function obj:fetchOpenCodeData()
     self._opencodePending = true
 
     -- Try HTTP API first (opencode serve)
-    hs.task.new("/usr/bin/curl", function(_, stdout, _)
-        local newData = {}
-
-        if stdout and stdout ~= "" then
-            local ok, sessions = pcall(hs.json.decode, stdout)
-            if ok and type(sessions) == "table" then
-                for _, s in ipairs(sessions) do
-                    if s.directory then
-                        local existing = newData[s.directory]
-                        if not existing or (s.time_updated or 0) > existing.updated then
-                            local m = {}
-                            if s.model then
-                                local ok2, parsed = pcall(hs.json.decode, s.model)
-                                if ok2 and type(parsed) == "table" then m = parsed end
-                            end
-                            newData[s.directory] = {
-                                title    = s.title,
-                                modelID  = m.id,
-                                provider = m.providerID,
-                                agent    = s.agent,
-                                tokensIn = s.tokens_input or 0,
-                                tokensOut = s.tokens_output or 0,
-                                updated  = s.time_updated or 0,
-                            }
-                        end
-                    end
-                end
-            end
-        end
-
-        -- If HTTP returned data, finalize; otherwise try SQLite fallback
-        if next(newData) then
-            self:_finalizeOpenCodeData(newData)
-            return
-        end
-
-        -- Fall back to SQLite database
-        local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
-        local sql = "SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
-
-        hs.task.new("/usr/bin/sqlite3", function(_, dbStdout, _)
+    local curlOk = pcall(function()
+        hs.task.new("/usr/bin/curl", function(_, stdout, _)
             local newData = {}
+            local hadResponse = stdout and stdout ~= ""
 
-            if dbStdout and dbStdout ~= "" then
-                local ok, sessions = pcall(hs.json.decode, dbStdout)
+            if hadResponse then
+                local ok, sessions = pcall(hs.json.decode, stdout)
                 if ok and type(sessions) == "table" then
                     for _, s in ipairs(sessions) do
-                        if s.directory and not newData[s.directory] then
-                            local m = {}
-                            if s.model then
-                                local ok2, parsed = pcall(hs.json.decode, s.model)
-                                if ok2 and type(parsed) == "table" then m = parsed end
+                        if s.directory then
+                            local existing = newData[s.directory]
+                            if not existing or (s.time_updated or 0) > existing.updated then
+                                local m = {}
+                                if s.model then
+                                    local ok2, parsed = pcall(hs.json.decode, s.model)
+                                    if ok2 and type(parsed) == "table" then m = parsed end
+                                end
+                                newData[s.directory] = {
+                                    title    = s.title,
+                                    modelID  = m.id,
+                                    provider = m.providerID,
+                                    agent    = s.agent,
+                                    tokensIn = s.tokens_input or 0,
+                                    tokensOut = s.tokens_output or 0,
+                                    updated  = s.time_updated or 0,
+                                }
                             end
-                            newData[s.directory] = {
-                                title    = s.title,
-                                modelID  = m.id,
-                                provider = m.providerID,
-                                agent    = s.agent,
-                                tokensIn = s.tokens_input or 0,
-                                tokensOut = s.tokens_output or 0,
-                                updated  = s.time_updated or 0,
-                            }
                         end
                     end
                 end
             end
 
-            self:_finalizeOpenCodeData(newData)
-        end, {"-json", dbPath, sql}):start()
-    end, {"-s", "-m", "2", "http://127.0.0.1:" .. self.config.opencode.port .. "/session"}):start()
+            -- If HTTP returned data (or server responded with bad data), finalize
+            if next(newData) or hadResponse then
+                self:_finalizeOpenCodeData(newData)
+                return
+            end
+
+            -- Fall back to SQLite database (no HTTP response at all)
+            local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
+            local sql = "SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
+
+            local sqlOk = pcall(function()
+                hs.task.new("/usr/bin/sqlite3", function(_, dbStdout, _)
+                    local newData = {}
+
+                    if dbStdout and dbStdout ~= "" then
+                        local ok, sessions = pcall(hs.json.decode, dbStdout)
+                        if ok and type(sessions) == "table" then
+                            for _, s in ipairs(sessions) do
+                                if s.directory and not newData[s.directory] then
+                                    local m = {}
+                                    if s.model then
+                                        local ok2, parsed = pcall(hs.json.decode, s.model)
+                                        if ok2 and type(parsed) == "table" then m = parsed end
+                                    end
+                                    newData[s.directory] = {
+                                        title    = s.title,
+                                        modelID  = m.id,
+                                        provider = m.providerID,
+                                        agent    = s.agent,
+                                        tokensIn = s.tokens_input or 0,
+                                        tokensOut = s.tokens_output or 0,
+                                        updated  = s.time_updated or 0,
+                                    }
+                                end
+                            end
+                        end
+                    end
+
+                    self:_finalizeOpenCodeData(newData)
+                end, {"-json", dbPath, sql}):start()
+            end)
+            if not sqlOk then
+                self:_finalizeOpenCodeData({})
+            end
+        end, {"-s", "-m", "2", "http://127.0.0.1:" .. self.config.opencode.port .. "/session"}):start()
+    end)
+    if not curlOk then
+        self._opencodePending = false
+    end
 end
 
 function obj:startOpenCodePolling()
