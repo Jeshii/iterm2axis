@@ -814,6 +814,11 @@ function obj:_doBuildSidebar()
             or basename
             or ("Window " .. i)
 
+        -- Hide Line 2 (PWD) when it would duplicate Line 1
+        if basename and basename == label then
+            basename = nil
+        end
+
         local ocData
         if fullPath and self._opencodeData[fullPath] then
             ocData = self._opencodeData[fullPath]
