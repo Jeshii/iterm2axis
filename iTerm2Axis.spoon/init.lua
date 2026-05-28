@@ -561,13 +561,13 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData, claudeCodeData
     for _, win in ipairs(wins) do
         local id = win:id()
         local fullPath = _wdCache[id] or ""
-        tostring(_gitBranchCache[id] or ""),
         table.insert(parts, table.concat({
             tostring(id),
             win:title() or "",
             tostring(id == activeId),
             tostring(_flashState[id] or false),
             tostring(fullPath),
+            tostring(_gitBranchCache[id] or ""),
             ocSnippet(opencodeData, fullPath),
             ocSnippet(claudeCodeData, fullPath),
         }, "\t"))
