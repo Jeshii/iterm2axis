@@ -249,9 +249,10 @@ local function startFlashing(winId)
                 _flashState[wid] = not _flashState[wid]
                 local bgIdx = obj._btnBgElements[wid]
                 if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+                    local normalCol = _flashNormalColor[wid]
                     local newColor = _flashState[wid]
                         and { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
-                        or _flashNormalColor[wid]
+                        or (normalCol and color(normalCol) or color(obj.config.buttonColor))
                     obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
                 end
             end
