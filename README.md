@@ -4,7 +4,7 @@ A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floatin
 
 ## Features
 
-- Floating sidebar showing all open iTerm2 windows with git branch subtitles
+- Floating sidebar showing all open iTerm2 windows — labeled by hostname (remote), current directory (local), or custom rename
 - Click any window button to bring it to the front
 - Keyboard navigation to cycle focus between windows
 - Right-click any window for a context menu: Rename, Reorder, Refresh, Show/Hide Axis, iTerm Settings Tip

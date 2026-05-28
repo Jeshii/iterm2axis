@@ -10,7 +10,7 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 
 - A floating sidebar canvas is drawn on the left side of the screen.
 - All iTerm2 windows are tiled to fill the remaining space to the right of the sidebar.
-- Each iTerm window is listed as a button in the sidebar with its git branch subtitle; clicking raises that window.
+- Each iTerm window is listed as a button in the sidebar — Line 1 shows the custom name, remote hostname, or local PWD basename (in that priority order); Line 2 shows PWD basename (when different from Line 1); Line 3 shows git branch
 - Right-click on any sidebar button opens a context menu (`hs.chooser`) with actions: Rename, Move Up/Down/ToTop/ToBottom, Refresh Layout, Show/Hide Axis, iTerm Settings Tip.
 - The sidebar snap formula: `sidebarX = math.max(f.x, sf.x)`; the iTerm window shrinks from its left edge so its right edge stays anchored.
 - If a window is dragged off the sidebar's range (by more than sidebar width), the sidebar reattaches to the next overlapping window.
@@ -34,3 +34,4 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 - All edits go into the repo's `iTerm2Axis.spoon/init.lua`. The user handles deployment.
 - When debugging, ask the user to check Hammerspoon's Console (menu bar icon → Console) or run `/Applications/Hammerspoon.app/Contents/MacOS/Hammerspoon` from a terminal to see errors.
 - Do not push changes to the remote without asking first
+- Window label priority: custom rename → remote hostname (parts.host) → local PWD basename → "Window N" fallback
