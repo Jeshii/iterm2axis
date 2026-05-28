@@ -489,6 +489,8 @@ function obj:fetchClaudeCodeData()
     if #wins == 0 then return end
 
     local pending = #wins
+    if pending == 0 then return end
+
     local function oneDone()
         pending = pending - 1
         if pending == 0 then
@@ -509,10 +511,11 @@ function obj:fetchClaudeCodeData()
 
     for _, win in ipairs(wins) do
         local fullPath = _wdCache[win:id()]
-        if fullPath then
-            fetchClaudeCodeForWindow(win, fullPath, oneDone)
-        else
+        if not fullPath then
+            getWindowWorkingDir(win)
             oneDone()
+        else
+            fetchClaudeCodeForWindow(win, fullPath, oneDone)
         end
     end
 end
@@ -1422,6 +1425,8 @@ function obj:start()
             isCCStateChange = title:match("^✳") or title:match("^·")
             if not isCCStateChange then
                 _wdCache[id] = nil
+                _ccCache[id] = nil
+                _ccPathKey[id] = nil
                 _gitBranchCache[id] = nil
             end
             local focusedWin = hs.window.focusedWindow()
