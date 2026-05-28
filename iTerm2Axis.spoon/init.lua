@@ -1076,6 +1076,10 @@ function obj:_doBuildSidebar()
         end
     end)
 
+    if self.sidebarCanvas then
+        self.sidebarCanvas:raise()
+    end
+
     self._buildPending = false
 
     if not ok then
@@ -1144,6 +1148,7 @@ function obj:renameWindow(windowId)
             self._customNamesByPath[fullPath] = input
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
         end
+        self._lastSidebarSnapshot = nil
         self:buildSidebar()
     elseif button == "Rename" and (not input or input == "") then
         self._customNames[windowId] = nil
@@ -1153,6 +1158,7 @@ function obj:renameWindow(windowId)
             self._customNamesByPath[fullPath] = nil
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
         end
+        self._lastSidebarSnapshot = nil
         self:buildSidebar()
     end
 end
@@ -1327,6 +1333,7 @@ function obj:moveWindowById(windowId, direction)
         self._orderedWindowIds[newIdx], self._orderedWindowIds[currentIdx]
     hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
     self._lastStructureSnapshot = nil
+    self._lastSidebarSnapshot = nil
     self:buildSidebar()
 end
 
@@ -1364,6 +1371,7 @@ function obj:moveWindowToExtent(windowId, extent)
     table.insert(self._orderedWindowIds, targetIdx, windowId)
     hs.settings.set(SETTINGS_KEY_ORDER, self._orderedWindowIds)
     self._lastStructureSnapshot = nil
+    self._lastSidebarSnapshot = nil
     self:buildSidebar()
 end
 
