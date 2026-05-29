@@ -1130,6 +1130,14 @@ function obj:bringWindowToFront(windowId)
         win:focus()
     end)
     if not ok then return end
+
+    if self.sidebarCanvas then
+        hs.timer.doAfter(0.05, function()
+            local winLevel = win:level()
+            self.sidebarCanvas:level(winLevel)
+        end)
+    end
+
     self:buildSidebar()
 end
 
@@ -1767,6 +1775,12 @@ function obj:start()
         if win and isITerm(win) then
             self.activeWindowId = win:id()
             stopFlashing(win:id())
+            if self.sidebarCanvas then
+                hs.timer.doAfter(0.05, function()
+                    local winLevel = win:level()
+                    self.sidebarCanvas:level(winLevel)
+                end)
+            end
         end
         self:handleWindowMoveOrResize()
     end)
