@@ -1098,6 +1098,7 @@ function obj:_doBuildSidebar()
     end)
 
     self._buildPending = false
+    self:syncCanvasLevel()
 
     if not ok then
         hs.printf("buildSidebar crashed: %s", tostring(err))
@@ -1132,13 +1133,18 @@ function obj:bringWindowToFront(windowId)
     if not ok then return end
 
     hs.timer.doAfter(0.05, function()
-        local w = hs.window.get(windowId)
-        if w and self.sidebarCanvas then
-            self.sidebarCanvas:level(w:level())
-        end
+        self:syncCanvasLevel()
     end)
 
     self:buildSidebar()
+end
+
+function obj:syncCanvasLevel()
+    if not self.sidebarCanvas then return end
+    local focused = hs.window.focusedWindow()
+    if focused and isITerm(focused) then
+        self.sidebarCanvas:level(focused:level())
+    end
 end
 
 -- ─────────────────────────────────────────────
@@ -1618,7 +1624,9 @@ function obj:bindHotkeys(mapping)
     end)
 
     hs.hotkey.bind(refreshMods, refreshKey, function()
-        self:buildSidebar(); self:tileITermWindows()
+        self:buildSidebar()
+        self:tileITermWindows()
+        self:syncCanvasLevel()
     end)
 
     hs.hotkey.bind(renameMods, renameKey, function()
@@ -1775,12 +1783,8 @@ function obj:start()
         if win and isITerm(win) then
             self.activeWindowId = win:id()
             stopFlashing(win:id())
-            local wid = win:id()
             hs.timer.doAfter(0.05, function()
-                local w = hs.window.get(wid)
-                if w and self.sidebarCanvas then
-                    self.sidebarCanvas:level(w:level())
-                end
+                self:syncCanvasLevel()
             end)
         end
         self:handleWindowMoveOrResize()
@@ -1867,10 +1871,7 @@ function obj:start()
     if self._spaceWatcher then self._spaceWatcher:stop() end
     self._spaceWatcher = hs.spaces.watcher.new(function()
         hs.timer.doAfter(0.15, function()
-            local focused = hs.window.focusedWindow()
-            if focused and isITerm(focused) and self.sidebarCanvas then
-                self.sidebarCanvas:level(focused:level())
-            end
+            self:syncCanvasLevel()
             if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
                 self:buildSidebar()
                 self:tileITermWindows()
@@ -1881,15 +1882,7 @@ function obj:start()
 
     if self._levelPollTimer then self._levelPollTimer:stop() end
     self._levelPollTimer = hs.timer.new(1, function()
-        if not self.sidebarCanvas then return end
-        local focused = hs.window.focusedWindow()
-        if focused and isITerm(focused) then
-            local targetLevel = focused:level()
-            local currentLevel = self.sidebarCanvas:level()
-            if currentLevel ~= targetLevel then
-                self.sidebarCanvas:level(targetLevel)
-            end
-        end
+        self:syncCanvasLevel()
     end)
     self._levelPollTimer:start()
 
