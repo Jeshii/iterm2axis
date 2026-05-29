@@ -1121,6 +1121,34 @@ function obj:tileITermWindows()
     end
 end
 
+function obj:refreshLayout()
+    local wins = getITermWindows()
+    if #wins > 0 then
+        local anchorWin = hs.window.focusedWindow()
+        if not (anchorWin and isITerm(anchorWin)) then
+            anchorWin = wins[1]
+        end
+        local f  = anchorWin:frame()
+        local sf = anchorWin:screen():frame()
+        local sidebarW = self.config.sidebarWidth
+        local sidebarX = math.max(f.x, sf.x)
+        self._pendingSidebarFrame = { x = sidebarX, y = f.y, w = sidebarW, h = f.h }
+        self._currentScreen = anchorWin:screen()
+        self._lastStructureSnapshot = nil
+    end
+    self:buildSidebar()
+    self:tileITermWindows()
+    self:syncCanvasLevel()
+end
+
+function obj:toggleSidebar()
+    if self.sidebarCanvas and self.sidebarCanvas:isVisible() then
+        self.sidebarCanvas:hide()
+    else
+        self:refreshLayout()
+    end
+end
+
 function obj:bringWindowToFront(windowId)
     local win = hs.window.get(windowId)
     if not win then return end
@@ -1143,7 +1171,10 @@ function obj:syncCanvasLevel()
     if not self.sidebarCanvas then return end
     local focused = hs.window.focusedWindow()
     if focused and isITerm(focused) then
-        self.sidebarCanvas:level(focused:level())
+        local ok, lvl = pcall(function() return focused:level() end)
+        if ok and lvl then
+            self.sidebarCanvas:level(lvl)
+        end
     end
 end
 
@@ -1256,20 +1287,9 @@ function obj:showWindowMenu(windowId)
         elseif choice.text == "Move to Bottom" then
             self:moveWindowToExtent(windowId, "bottom")
         elseif choice.text == "Refresh Layout" then
-            self:buildSidebar()
-            self:tileITermWindows()
+            self:refreshLayout()
         elseif choice.text == "Show/Hide Axis" then
-            if self.sidebarCanvas then
-                if self.sidebarCanvas:isVisible() then
-                    self.sidebarCanvas:hide()
-                else
-                    self:buildSidebar()
-                    self:tileITermWindows()
-                end
-            else
-                self:buildSidebar()
-                self:tileITermWindows()
-            end
+            self:toggleSidebar()
         elseif choice.text == "iTerm Settings" then
             self:showPreferencesTip()
         end
@@ -1600,15 +1620,7 @@ function obj:bindHotkeys(mapping)
     local focusDownMods, focusDownKey   = table.unpack(map.focusDown    or {{"alt","cmd"}, "down"})
 
     hs.hotkey.bind(toggleMods, toggleKey, function()
-        if self.sidebarCanvas then
-            if self.sidebarCanvas:isVisible() then
-                self.sidebarCanvas:hide()
-            else
-                self:buildSidebar(); self:tileITermWindows()
-            end
-        else
-            self:buildSidebar(); self:tileITermWindows()
-        end
+        self:toggleSidebar()
     end)
 
     hs.hotkey.bind(newWinMods, newWinKey, function()
@@ -1624,9 +1636,7 @@ function obj:bindHotkeys(mapping)
     end)
 
     hs.hotkey.bind(refreshMods, refreshKey, function()
-        self:buildSidebar()
-        self:tileITermWindows()
-        self:syncCanvasLevel()
+        self:refreshLayout()
     end)
 
     hs.hotkey.bind(renameMods, renameKey, function()
