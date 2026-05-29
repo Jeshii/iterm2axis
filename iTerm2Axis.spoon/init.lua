@@ -1169,9 +1169,22 @@ end
 
 function obj:syncCanvasLevel()
     if not self.sidebarCanvas then return end
+    local targetWin = nil
     local focused = hs.window.focusedWindow()
     if focused and isITerm(focused) then
-        local ok, lvl = pcall(function() return focused:level() end)
+        targetWin = focused
+    else
+        local best, bestLvl = nil, -math.huge
+        for _, w in ipairs(getITermWindows()) do
+            local ok, lvl = pcall(function() return w:level() end)
+            if ok and lvl and lvl > bestLvl then
+                best, bestLvl = w, lvl
+            end
+        end
+        targetWin = best
+    end
+    if targetWin then
+        local ok, lvl = pcall(function() return targetWin:level() end)
         if ok and lvl then
             self.sidebarCanvas:level(lvl)
         end
