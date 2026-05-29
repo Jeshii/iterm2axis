@@ -1131,12 +1131,12 @@ function obj:bringWindowToFront(windowId)
     end)
     if not ok then return end
 
-    if self.sidebarCanvas then
-        hs.timer.doAfter(0.05, function()
-            local winLevel = win:level()
-            self.sidebarCanvas:level(winLevel)
-        end)
-    end
+    hs.timer.doAfter(0.05, function()
+        local w = hs.window.get(windowId)
+        if w and self.sidebarCanvas then
+            self.sidebarCanvas:level(w:level())
+        end
+    end)
 
     self:buildSidebar()
 end
@@ -1775,12 +1775,13 @@ function obj:start()
         if win and isITerm(win) then
             self.activeWindowId = win:id()
             stopFlashing(win:id())
-            if self.sidebarCanvas then
-                hs.timer.doAfter(0.05, function()
-                    local winLevel = win:level()
-                    self.sidebarCanvas:level(winLevel)
-                end)
-            end
+            local wid = win:id()
+            hs.timer.doAfter(0.05, function()
+                local w = hs.window.get(wid)
+                if w and self.sidebarCanvas then
+                    self.sidebarCanvas:level(w:level())
+                end
+            end)
         end
         self:handleWindowMoveOrResize()
     end)
@@ -1869,6 +1870,31 @@ function obj:start()
     end)
     self._appWatcher:start()
 
+    if self._spaceWatcher then self._spaceWatcher:stop() end
+    self._spaceWatcher = hs.spaces.watcher.new(function()
+        hs.timer.doAfter(0.15, function()
+            local focused = hs.window.focusedWindow()
+            if focused and isITerm(focused) and self.sidebarCanvas then
+                self.sidebarCanvas:level(focused:level())
+            end
+        end)
+    end)
+    self._spaceWatcher:start()
+
+    if self._levelPollTimer then self._levelPollTimer:stop() end
+    self._levelPollTimer = hs.timer.new(1, function()
+        if not self.sidebarCanvas then return end
+        local focused = hs.window.focusedWindow()
+        if focused and isITerm(focused) then
+            local targetLevel = focused:level()
+            local currentLevel = self.sidebarCanvas:level()
+            if currentLevel ~= targetLevel then
+                self.sidebarCanvas:level(targetLevel)
+            end
+        end
+    end)
+    self._levelPollTimer:start()
+
     self:buildSidebar()
     self:tileITermWindows()
 
@@ -1906,6 +1932,8 @@ function obj:stop()
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
     if self._appWatcher    then self._appWatcher:stop();    self._appWatcher    = nil end
+    if self._spaceWatcher then self._spaceWatcher:stop(); self._spaceWatcher = nil end
+    if self._levelPollTimer then self._levelPollTimer:stop(); self._levelPollTimer = nil end
     for _, w in pairs(self._windowWatchers or {}) do w:stop() end
     self._windowWatchers = {}
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
@@ -1951,6 +1979,8 @@ function obj:init()
     self._winWatcher     = nil
     self._screenWatcher  = nil
     self._appWatcher     = nil
+    self._spaceWatcher   = nil
+    self._levelPollTimer = nil
     self._tipCanvas      = nil
     self._tipKey         = nil
     self._windowWatchers   = {}
