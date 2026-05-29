@@ -861,7 +861,7 @@ function obj:_doBuildSidebar()
             end
 
             self.sidebarCanvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
-            self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+            self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
             self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
             self.sidebarCanvas:alpha(1)
             self._lastStructureSnapshot = structureSnap
@@ -1024,7 +1024,6 @@ function obj:_doBuildSidebar()
             self._pendingSidebarFrame = nil
             if needsFullRebuild then
                 self.sidebarCanvas:show()
-                self.sidebarCanvas:raise()
             end
         else
             -- ── In-place update path: elementAttribute calls only ──
@@ -1769,10 +1768,7 @@ function obj:start()
             self.activeWindowId = win:id()
             stopFlashing(win:id())
         end
-        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-            self.sidebarCanvas:raise()
-            self:handleWindowMoveOrResize()
-        end
+        self:handleWindowMoveOrResize()
     end)
 
     -- Load path-keyed names BEFORE triggering async WD fetches, so the
@@ -1855,13 +1851,7 @@ function obj:start()
 
     if self._appWatcher then self._appWatcher:stop() end
     self._appWatcher = hs.application.watcher.new(function(name, event, app)
-        if event == hs.application.watcher.activated then
-            if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-                hs.timer.doAfter(0, function()
-                    self.sidebarCanvas:raise()
-                end)
-            end
-        end
+
     end)
     self._appWatcher:start()
 
