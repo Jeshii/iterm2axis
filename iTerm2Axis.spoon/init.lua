@@ -864,6 +864,7 @@ function obj:_doBuildSidebar()
             self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
             self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
             self.sidebarCanvas:alpha(1)
+            self._sidebarVisible = true
             self._lastStructureSnapshot = structureSnap
         elseif needsAnyWindowRebuild then
             self.sidebarCanvas:replaceElements()
@@ -1024,6 +1025,7 @@ function obj:_doBuildSidebar()
             self._pendingSidebarFrame = nil
             if needsFullRebuild then
                 self.sidebarCanvas:show()
+                self._sidebarVisible = true
             end
         else
             -- ── In-place update path: elementAttribute calls only ──
@@ -1142,8 +1144,9 @@ function obj:refreshLayout()
 end
 
 function obj:toggleSidebar()
-    if self.sidebarCanvas and self.sidebarCanvas:isVisible() then
+    if self.sidebarCanvas and self._sidebarVisible then
         self.sidebarCanvas:hide()
+        self._sidebarVisible = false
     else
         self:refreshLayout()
     end
@@ -1184,10 +1187,9 @@ function obj:syncCanvasLevel()
         targetWin = best
     end
     if targetWin then
-        local ok, lvl = pcall(function() return targetWin:level() end)
-        if ok and lvl then
-            self.sidebarCanvas:level(lvl)
-        end
+        self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+    else
+        self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
     end
 end
 
@@ -1714,7 +1716,10 @@ function obj:start()
             local sf = self.sidebarCanvas:frame()
             local mouse = hs.mouse.absolutePosition()
 
-            local inSidebar = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
+            local frontApp = hs.application.frontmostApplication()
+            local frontIsITerm = frontApp and frontApp:bundleID() == "com.googlecode.iterm2"
+            local inSidebar = self._sidebarVisible and frontIsITerm
+                and mouse.x >= sf.x and mouse.x <= sf.x + sf.w
                 and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
 
             if eventType == hs.eventtap.event.types.leftMouseDown then
@@ -1812,6 +1817,24 @@ function obj:start()
         end
         self:handleWindowMoveOrResize()
     end)
+
+    -- Application focus watcher: drop canvas to normal when another app
+    -- takes focus so it doesn't float on top of non-iTerm windows.
+    if self._appWatcher then self._appWatcher:stop() end
+    self._appWatcher = hs.application.watcher.new(function(appName, event, appObj)
+      if event == hs.application.watcher.deactivated then
+        local bid = appObj and appObj:bundleID()
+        if bid == "com.googlecode.iterm2" and self.sidebarCanvas then
+          self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
+        end
+      elseif event == hs.application.watcher.activated then
+        local bid = appObj and appObj:bundleID()
+        if bid == "com.googlecode.iterm2" and self.sidebarCanvas and self._sidebarVisible then
+          self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+        end
+      end
+    end)
+    self._appWatcher:start()
 
     -- Load path-keyed names BEFORE triggering async WD fetches, so the
     -- callback in getWindowWorkingDir finds _customNamesByPath populated.
@@ -1942,6 +1965,7 @@ function obj:stop()
     if self._customNamesByPath and next(self._customNamesByPath) then
         hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
     end
+    if self._appWatcher    then self._appWatcher:stop();    self._appWatcher    = nil end
     if self._mouseTap      then self._mouseTap:stop();      self._mouseTap      = nil end
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
@@ -1993,6 +2017,8 @@ function obj:init()
     self._screenWatcher  = nil
     self._spaceWatcher   = nil
     self._levelPollTimer = nil
+    self._appWatcher     = nil
+    self._sidebarVisible = false
     self._tipCanvas      = nil
     self._tipKey         = nil
     self._windowWatchers   = {}
