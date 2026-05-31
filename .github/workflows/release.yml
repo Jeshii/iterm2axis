@@ -34,10 +34,7 @@ jobs:
         with:
           files: iTerm2Axis.spoon.zip
           name: iTerm2Axis ${{ steps.version.outputs.value }}
-          body: |
-            See [AGENTS.md](https://github.com/jeshii/iterm2axis/blob/main/AGENTS.md) for usage instructions.
-
-            To install: unzip and copy `iTerm2Axis.spoon` to `~/.hammerspoon/Spoons/`, then add `hs.loadSpoon("iTerm2Axis")` to your `init.lua`.
+          body_path: CHANGELOG.md
 
       - name: Upload dev build artifact
         if: github.ref == 'refs/heads/main'

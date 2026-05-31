@@ -35,3 +35,5 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 - When debugging, ask the user to check Hammerspoon's Console (menu bar icon → Console) or run `/Applications/Hammerspoon.app/Contents/MacOS/Hammerspoon` from a terminal to see errors.
 - Do not push changes to the remote without asking first
 - Window label priority: custom rename → remote hostname (parts.host) → local PWD basename → "Window N" fallback
+- Update CHANGELOG.md after making any changes
+- Inform the user if AGENTS.md or README.md need updates after making any changes
