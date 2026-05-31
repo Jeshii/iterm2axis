@@ -75,3 +75,37 @@ Customise `spoon.iTerm2Axis.config` before calling `:start()`:
 spoon.iTerm2Axis.config.sidebarWidth = 200
 spoon.iTerm2Axis.config.activeButtonColor = {red=0.8, green=0.3, blue=0.1, alpha=1}
 ```
+
+The sidebar only intercepts clicks when iTerm2 is the focused application, so it never disrupts other apps.
+
+Available options (all optional — defaults are used for anything omitted):
+
+```lua
+spoon.iTerm2Axis.config = {
+    sidebarWidth = 260,
+    windowButtonHeight = 90,
+    padding = 8,
+    sidebarColor = {red=0.14, green=0.14, blue=0.15, alpha=1},
+    buttonColor = {red=0.24, green=0.25, blue=0.28, alpha=1},
+    activeButtonColor = {red=0.35, green=0.55, blue=0.85, alpha=1},
+    textColor = {red=0.85, green=0.86, blue=0.88, alpha=1},
+    font = ".AppleSystemUIFont",
+    fontSize = 13,
+    debug = false,
+    opencode = {
+        enabled = true,
+        port = 4096,
+        pollInterval = 5,
+    },
+    claudecode = {
+        enabled = true,
+        pollInterval = 5,
+        flashInterval = 2.0,
+    },
+    bell = {
+        enabled = true,
+        flashInterval = 2.0,
+        flashColor = {red=0.95, green=0.85, blue=0.4, alpha=0.85},
+    },
+}
+```
