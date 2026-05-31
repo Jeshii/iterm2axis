@@ -861,9 +861,10 @@ function obj:_doBuildSidebar()
             end
 
             self.sidebarCanvas = hs.canvas.new({ x = sb.x, y = sb.y, w = sb.w, h = sb.h })
-            self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+            self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
             self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
             self.sidebarCanvas:alpha(1)
+            self._sidebarVisible = true
             self._lastStructureSnapshot = structureSnap
         elseif needsAnyWindowRebuild then
             self.sidebarCanvas:replaceElements()
@@ -1024,7 +1025,7 @@ function obj:_doBuildSidebar()
             self._pendingSidebarFrame = nil
             if needsFullRebuild then
                 self.sidebarCanvas:show()
-                self.sidebarCanvas:raise()
+                self._sidebarVisible = true
             end
         else
             -- ── In-place update path: elementAttribute calls only ──
@@ -1099,6 +1100,7 @@ function obj:_doBuildSidebar()
     end)
 
     self._buildPending = false
+    self:syncCanvasLevel()
 
     if not ok then
         hs.printf("buildSidebar crashed: %s", tostring(err))
@@ -1121,6 +1123,35 @@ function obj:tileITermWindows()
     end
 end
 
+function obj:refreshLayout()
+    local wins = getITermWindows()
+    if #wins > 0 then
+        local anchorWin = hs.window.focusedWindow()
+        if not (anchorWin and isITerm(anchorWin)) then
+            anchorWin = wins[1]
+        end
+        local f  = anchorWin:frame()
+        local sf = anchorWin:screen():frame()
+        local sidebarW = self.config.sidebarWidth
+        local sidebarX = math.max(f.x, sf.x)
+        self._pendingSidebarFrame = { x = sidebarX, y = f.y, w = sidebarW, h = f.h }
+        self._currentScreen = anchorWin:screen()
+        self._lastStructureSnapshot = nil
+    end
+    self:buildSidebar()
+    self:tileITermWindows()
+    self:syncCanvasLevel()
+end
+
+function obj:toggleSidebar()
+    if self.sidebarCanvas and self._sidebarVisible then
+        self.sidebarCanvas:hide()
+        self._sidebarVisible = false
+    else
+        self:refreshLayout()
+    end
+end
+
 function obj:bringWindowToFront(windowId)
     local win = hs.window.get(windowId)
     if not win then return end
@@ -1131,7 +1162,35 @@ function obj:bringWindowToFront(windowId)
         win:focus()
     end)
     if not ok then return end
+
+    hs.timer.doAfter(0.05, function()
+        self:syncCanvasLevel()
+    end)
+
     self:buildSidebar()
+end
+
+function obj:syncCanvasLevel()
+    if not self.sidebarCanvas then return end
+    local targetWin = nil
+    local focused = hs.window.focusedWindow()
+    if focused and isITerm(focused) then
+        targetWin = focused
+    else
+        local best, bestLvl = nil, -math.huge
+        for _, w in ipairs(getITermWindows()) do
+            local ok, lvl = pcall(function() return w:level() end)
+            if ok and lvl and lvl > bestLvl then
+                best, bestLvl = w, lvl
+            end
+        end
+        targetWin = best
+    end
+    if targetWin then
+        self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+    else
+        self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
+    end
 end
 
 -- ─────────────────────────────────────────────
@@ -1243,20 +1302,9 @@ function obj:showWindowMenu(windowId)
         elseif choice.text == "Move to Bottom" then
             self:moveWindowToExtent(windowId, "bottom")
         elseif choice.text == "Refresh Layout" then
-            self:buildSidebar()
-            self:tileITermWindows()
+            self:refreshLayout()
         elseif choice.text == "Show/Hide Axis" then
-            if self.sidebarCanvas then
-                if self.sidebarCanvas:isVisible() then
-                    self.sidebarCanvas:hide()
-                else
-                    self:buildSidebar()
-                    self:tileITermWindows()
-                end
-            else
-                self:buildSidebar()
-                self:tileITermWindows()
-            end
+            self:toggleSidebar()
         elseif choice.text == "iTerm Settings" then
             self:showPreferencesTip()
         end
@@ -1587,15 +1635,7 @@ function obj:bindHotkeys(mapping)
     local focusDownMods, focusDownKey   = table.unpack(map.focusDown    or {{"alt","cmd"}, "down"})
 
     hs.hotkey.bind(toggleMods, toggleKey, function()
-        if self.sidebarCanvas then
-            if self.sidebarCanvas:isVisible() then
-                self.sidebarCanvas:hide()
-            else
-                self:buildSidebar(); self:tileITermWindows()
-            end
-        else
-            self:buildSidebar(); self:tileITermWindows()
-        end
+        self:toggleSidebar()
     end)
 
     hs.hotkey.bind(newWinMods, newWinKey, function()
@@ -1611,7 +1651,7 @@ function obj:bindHotkeys(mapping)
     end)
 
     hs.hotkey.bind(refreshMods, refreshKey, function()
-        self:buildSidebar(); self:tileITermWindows()
+        self:refreshLayout()
     end)
 
     hs.hotkey.bind(renameMods, renameKey, function()
@@ -1676,7 +1716,10 @@ function obj:start()
             local sf = self.sidebarCanvas:frame()
             local mouse = hs.mouse.absolutePosition()
 
-            local inSidebar = mouse.x >= sf.x and mouse.x <= sf.x + sf.w
+            local frontApp = hs.application.frontmostApplication()
+            local frontIsITerm = frontApp and frontApp:bundleID() == "com.googlecode.iterm2"
+            local inSidebar = self._sidebarVisible and frontIsITerm
+                and mouse.x >= sf.x and mouse.x <= sf.x + sf.w
                 and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
 
             if eventType == hs.eventtap.event.types.leftMouseDown then
@@ -1768,12 +1811,30 @@ function obj:start()
         if win and isITerm(win) then
             self.activeWindowId = win:id()
             stopFlashing(win:id())
+            hs.timer.doAfter(0.05, function()
+                self:syncCanvasLevel()
+            end)
         end
-        if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-            self.sidebarCanvas:raise()
-            self:handleWindowMoveOrResize()
-        end
+        self:handleWindowMoveOrResize()
     end)
+
+    -- Application focus watcher: drop canvas to normal when another app
+    -- takes focus so it doesn't float on top of non-iTerm windows.
+    if self._appWatcher then self._appWatcher:stop() end
+    self._appWatcher = hs.application.watcher.new(function(appName, event, appObj)
+      if event == hs.application.watcher.deactivated then
+        local bid = appObj and appObj:bundleID()
+        if bid == "com.googlecode.iterm2" and self.sidebarCanvas then
+          self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
+        end
+      elseif event == hs.application.watcher.activated then
+        local bid = appObj and appObj:bundleID()
+        if bid == "com.googlecode.iterm2" and self.sidebarCanvas and self._sidebarVisible then
+          self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+        end
+      end
+    end)
+    self._appWatcher:start()
 
     -- Load path-keyed names BEFORE triggering async WD fetches, so the
     -- callback in getWindowWorkingDir finds _customNamesByPath populated.
@@ -1853,17 +1914,23 @@ function obj:start()
     end)
     self._screenWatcher:start()
 
-    if self._appWatcher then self._appWatcher:stop() end
-    self._appWatcher = hs.application.watcher.new(function(name, event, app)
-        if event == hs.application.watcher.activated then
+    if self._spaceWatcher then self._spaceWatcher:stop() end
+    self._spaceWatcher = hs.spaces.watcher.new(function()
+        hs.timer.doAfter(0.15, function()
+            self:syncCanvasLevel()
             if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
-                hs.timer.doAfter(0, function()
-                    self.sidebarCanvas:raise()
-                end)
+                self:buildSidebar()
+                self:tileITermWindows()
             end
-        end
+        end)
     end)
-    self._appWatcher:start()
+    self._spaceWatcher:start()
+
+    if self._levelPollTimer then self._levelPollTimer:stop() end
+    self._levelPollTimer = hs.timer.new(1, function()
+        self:syncCanvasLevel()
+    end)
+    self._levelPollTimer:start()
 
     self:buildSidebar()
     self:tileITermWindows()
@@ -1898,10 +1965,12 @@ function obj:stop()
     if self._customNamesByPath and next(self._customNamesByPath) then
         hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
     end
+    if self._appWatcher    then self._appWatcher:stop();    self._appWatcher    = nil end
     if self._mouseTap      then self._mouseTap:stop();      self._mouseTap      = nil end
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
-    if self._appWatcher    then self._appWatcher:stop();    self._appWatcher    = nil end
+    if self._spaceWatcher then self._spaceWatcher:stop(); self._spaceWatcher = nil end
+    if self._levelPollTimer then self._levelPollTimer:stop(); self._levelPollTimer = nil end
     for _, w in pairs(self._windowWatchers or {}) do w:stop() end
     self._windowWatchers = {}
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
@@ -1946,7 +2015,10 @@ function obj:init()
     self._mouseTap       = nil
     self._winWatcher     = nil
     self._screenWatcher  = nil
+    self._spaceWatcher   = nil
+    self._levelPollTimer = nil
     self._appWatcher     = nil
+    self._sidebarVisible = false
     self._tipCanvas      = nil
     self._tipKey         = nil
     self._windowWatchers   = {}
