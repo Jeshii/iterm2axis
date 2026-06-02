@@ -1,5 +1,8 @@
 ## 2026-06-02
 
+- Fixed `toggleSidebar` not reliably showing sidebar when toggling back on — now explicitly calls `show()`, clears snapshot caches to force full rebuild, and re-tiles windows + syncs canvas level
+- Fixed off-by-sidebar-width positioning bug in `toggleSidebar`: when the sidebar was hidden, iTerm windows sit at the content offset (`f.x = original.x + sidebarWidth`), so recomputing the anchor from `f.x` places the sidebar overlapping them. Now walks back by `sidebarWidth` (`f.x - sidebarWidth`) to find the true left edge before calling `refreshLayout`
+
 - Fixed right-click context menu showing duplicate entries (Rename through Move to Bottom appeared twice in `showWindowMenu` items table)
 
 - Fixed `⌘⇧N` new window hotkey: replaced `hs.application.find("iTerm2")` with `hs.application.get("com.googlecode.iterm2")` and added a 0.15s delay before sending `⌘N` so iTerm2 has time to gain focus
