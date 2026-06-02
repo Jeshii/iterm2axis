@@ -280,8 +280,8 @@ local function getGitBranchForPath(path, winId)
                 cd ']] .. path .. [[' 2>/dev/null || exit 1
                 TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
                 git worktree list --porcelain 2>/dev/null | awk -v wt="$TOPLEVEL" '
-                    /^worktree / { cur=$2; next }
-                    /^branch /  { if (cur==wt) { sub("^branch refs/heads/",""); print $0"\t"cur } }
+                    /^worktree / { count++; cur=$2; next }
+                    /^branch /  { if (cur==wt && count > 1) { sub("^branch refs/heads/",""); print $0"\t"cur } }
                 ' | head -1
             ]]}):start()
             return
@@ -862,7 +862,7 @@ function obj:_doBuildSidebar()
         local rawTitle = win:title() or ""
         local parts    = parseTitleComponents(rawTitle)
         local prFromTitle = parsePRFromTitle(rawTitle)
-        if prFromTitle and prFromTitle <= 0 then prFromTitle = nil end
+        if prFromTitle and prFromTitle <= 0 then prFromTitle = nil end  -- 0 is truthy in Lua, guard explicit
         local fullPath = getWindowWorkingDir(win)
         local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
         local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
