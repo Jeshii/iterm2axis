@@ -40,6 +40,16 @@ spoon.iTerm2Axis:bindHotkeys({
 
 4. Reload your Hammerspoon config (`⌘⇧R` in the Hammerspoon menu, or `hs.reload()` in the console).
 
+## iTerm2 Configuration
+
+For iTerm2Axis to properly detect the current working directory (and show git branch info, opencode/Claude Code session data), your iTerm2 profile must be configured to share the session working directory:
+
+1. Open iTerm2 → **Settings** → **Profiles** → select your profile → **General** tab
+2. Under **Working Directory**, select **Reuse previous session's directory**
+3. (optional) Click **Advanced Configuration** to fine-tune behavior for new windows, tabs, and split panes independently
+
+This ensures that each session reports its actual working directory to iTerm2 so the axis can read it via AppleScript (`session.path`).
+
 ## Hotkeys
 
 All hotkeys have built-in defaults but **are only registered when you call `bindHotkeys`** in your `init.lua`. You can override any combo by passing your preferred modifiers and key, or omit any entry to accept the default.

@@ -1489,129 +1489,168 @@ function obj:cancelRenameMode()
 end
 
 function obj:showWindowMenu(windowId)
-    local choices = {
-        { text = "Rename", subText = "Set a custom name for this window    ⌘⇧W" },
-        { text = "Move Up", subText = "Reorder this window higher    ⌘⇧[" },
-        { text = "Move Down", subText = "Reorder this window lower    ⌘⇧]" },
-        { text = "Move to Top", subText = "Move this window to the top    ⌘⇧↑" },
-        { text = "Move to Bottom", subText = "Move this window to the bottom    ⌘⇧↓" },
-        { text = "Refresh Layout", subText = "Re-tile all windows    ⌘⇧R" },
-        { text = "Show/Hide Axis", subText = "Toggle sidebar visibility    ⌘⇧A" },
-        { text = "iTerm Settings", subText = "Show setup guide for reusing session directory" },
+    -- Close any existing menu
+    if self._menuCanvas then
+        self._menuCanvas:delete()
+        self._menuCanvas = nil
+    end
+    if self._menuEventTap then
+        self._menuEventTap:stop()
+        self._menuEventTap = nil
+    end
+    if self._menuKeyTap then
+        self._menuKeyTap:stop()
+        self._menuKeyTap = nil
+    end
+
+    local items = {
+        { label = "Rename",         shortcut = "\xE2\x8C\x98\xE2\x87\xA7W",        action = function() self:renameWindow(windowId) end },
+        { label = "Move Up",        shortcut = "\xE2\x8C\x98\xE2\x87\xA7[",        action = function() self:moveWindowById(windowId, -1) end },
+        { label = "Move Down",      shortcut = "\xE2\x8C\x98\xE2\x87\xA7]",        action = function() self:moveWindowById(windowId, 1) end },
+        { label = "Move to Top",    shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x91", action = function() self:moveWindowToExtent(windowId, "top") end },
+        { label = "Move to Bottom", shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x93", action = function() self:moveWindowToExtent(windowId, "bottom") end },
+        { label = "Refresh Layout", shortcut = "\xE2\x8C\x98\xE2\x87\xA7R",        action = function() self:refreshLayout() end },
+        { label = "Show/Hide Axis", shortcut = "\xE2\x8C\x98\xE2\x87\xA7A",        action = function() self:toggleSidebar() end },
     }
 
-    -- Show opencode session info for this window if available
-    local win = hs.window.get(windowId)
-    local title = win and win:title() or ""
-    local parts = parseTitleComponents(title)
-    local oc
-    if parts.fullPath and self._opencodeData[parts.fullPath] then
-        oc = self._opencodeData[parts.fullPath]
-    else
-        for _, d in pairs(self._opencodeData or {}) do
-            if d.title and title:find(d.title, 1, true) then
-                oc = d
-                break
-            end
-        end
-    end
-    if oc then
-        local modelStr = shortModelName(oc.modelID) or "?"
-        local titleStr = oc.title or "Untitled"
-        table.insert(choices, 1, {
-            text = "OpenCode: " .. modelStr .. " (" .. (oc.agent or "?") .. ")",
-            subText = titleStr .. "  ·  " .. fmtTokens(oc.tokensIn or 0) .. " in, " .. fmtTokens(oc.tokensOut or 0) .. " out",
-        })
-    end
+    local ROW_H    = 22
+    local PAD_X    = 10
+    local PAD_Y    = 4
+    local MENU_W   = 210
+    local MENU_H   = #items * ROW_H + PAD_Y * 2
 
-    local chooser = hs.chooser.new(function(choice)
-        if not choice then return end
-        if choice.text == "Rename" then
-            self:renameWindow(windowId)
-        elseif choice.text == "Move Up" then
-            self:moveWindowById(windowId, -1)
-        elseif choice.text == "Move Down" then
-            self:moveWindowById(windowId, 1)
-        elseif choice.text == "Move to Top" then
-            self:moveWindowToExtent(windowId, "top")
-        elseif choice.text == "Move to Bottom" then
-            self:moveWindowToExtent(windowId, "bottom")
-        elseif choice.text == "Refresh Layout" then
-            self:refreshLayout()
-        elseif choice.text == "Show/Hide Axis" then
-            self:toggleSidebar()
-        elseif choice.text == "iTerm Settings" then
-            self:showPreferencesTip()
-        end
-    end)
-    chooser:choices(choices)
-    chooser:searchSubText(false)
-    chooser:show()
-end
+    local mouse    = hs.mouse.absolutePosition()
+    local screen   = hs.screen.mainScreen():frame()
 
-function obj:showPreferencesTip()
-    if self._tipCanvas then
-        self._tipCanvas:delete()
-        self._tipCanvas = nil
-        if self._tipKey then self._tipKey:delete(); self._tipKey = nil end
-        return
-    end
+    -- Clamp so menu stays on screen
+    local mx = math.min(mouse.x, screen.x + screen.w - MENU_W - 4)
+    local my = math.min(mouse.y, screen.y + screen.h - MENU_H - 4)
 
-    local spoonDir = hs.spoons.scriptPath():match("^(.+/)")
-    local imgPath = spoonDir .. "preferences_tip.png"
-    local img = hs.image.imageFromPath(imgPath)
-    if not img then
-        hs.alert.show("Tip image not found", 2)
-        return
-    end
-
-    local screen = hs.screen.mainScreen():frame()
-    local imgSize = img:size()
-
-    local pad = 60
-    local cw = screen.w - pad * 2
-    local ch = screen.h - pad * 2
-
-    local scale = math.min(cw / imgSize.w, ch / imgSize.h, 1)
-    local iw = math.floor(imgSize.w * scale)
-    local ih = math.floor(imgSize.h * scale)
-    local ix = math.floor((cw - iw) / 2)
-    local iy = math.floor((ch - ih) / 2)
-
-    local canvas = hs.canvas.new({ x = screen.x, y = screen.y, w = screen.w, h = screen.h })
-    canvas:level(hs.canvas.windowLevels.floating)
+    local canvas = hs.canvas.new({ x = mx, y = my, w = MENU_W, h = MENU_H })
+    canvas:level(hs.canvas.windowLevels.popUpMenu)
     canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
 
+    -- Background
     canvas:appendElements({
-        type = "rectangle",
-        frame = { x = 0, y = 0, w = screen.w, h = screen.h },
-        fillColor = { red = 0, green = 0, blue = 0, alpha = 0.5 },
+        type        = "rectangle",
+        frame       = { x = 0, y = 0, w = MENU_W, h = MENU_H },
+        fillColor   = { red = 0.15, green = 0.15, blue = 0.17, alpha = 0.97 },
+        strokeColor = { red = 0.35, green = 0.35, blue = 0.40, alpha = 0.8 },
+        strokeWidth = 1,
+        roundedRectRadii = { xRadius = 5, yRadius = 5 },
+    })
+
+    -- Row highlight tracker (element index 2, hidden initially)
+    canvas:appendElements({
+        type      = "rectangle",
+        frame     = { x = 3, y = PAD_Y, w = MENU_W - 6, h = ROW_H },
+        fillColor = { red = 0.25, green = 0.4, blue = 0.6, alpha = 0 },
         strokeWidth = 0,
+        roundedRectRadii = { xRadius = 3, yRadius = 3 },
     })
-    canvas:appendElements({
-        type = "image",
-        image = img,
-        frame = { x = pad + ix, y = pad + iy, w = iw, h = ih },
-    })
+    local HIGHLIGHT_IDX = 2
 
-    canvas:canvasMouseEvents(true)
-    canvas:mouseCallback(function(_, _, event)
-        if event == "leftMouseDown" then
-            canvas:delete()
-            if self._tipCanvas == canvas then self._tipCanvas = nil end
-            if self._tipKey then self._tipKey:delete(); self._tipKey = nil end
+    -- Row text elements (label + shortcut)
+    for i, item in ipairs(items) do
+        local rowY = PAD_Y + (i - 1) * ROW_H
+        canvas:appendElements({
+            type          = "text",
+            frame         = { x = PAD_X, y = rowY + 4, w = MENU_W - PAD_X * 2, h = ROW_H - 4 },
+            text          = item.label,
+            textColor     = { red = 0.9, green = 0.9, blue = 0.9, alpha = 1 },
+            textSize      = 12,
+            textAlignment = "left",
+        })
+        if item.shortcut then
+            canvas:appendElements({
+                type          = "text",
+                frame         = { x = PAD_X, y = rowY + 4, w = MENU_W - PAD_X * 2, h = ROW_H - 4 },
+                text          = item.shortcut,
+                textColor     = { red = 0.6, green = 0.6, blue = 0.65, alpha = 0.85 },
+                textSize      = 11,
+                textAlignment = "right",
+            })
         end
-    end)
-
-    self._tipKey = hs.hotkey.bind({}, "escape", function()
-        canvas:delete()
-        if self._tipCanvas == canvas then self._tipCanvas = nil end
-        if self._tipKey then self._tipKey:delete(); self._tipKey = nil end
-    end)
+    end
 
     canvas:show()
-    self._tipCanvas = canvas
+    self._menuCanvas = canvas
+
+    local function closeMenu()
+        if self._menuCanvas then
+            self._menuCanvas:delete()
+            self._menuCanvas = nil
+        end
+        if self._menuEventTap then
+            self._menuEventTap:stop()
+            self._menuEventTap = nil
+        end
+        if self._menuKeyTap then
+            self._menuKeyTap:stop()
+            self._menuKeyTap = nil
+        end
+    end
+
+    local function rowAtY(ly)
+        local row = math.floor((ly - PAD_Y) / ROW_H) + 1
+        if row >= 1 and row <= #items then return row end
+        return nil
+    end
+
+    self._menuEventTap = hs.eventtap.new(
+        { hs.eventtap.event.types.mouseMoved,
+          hs.eventtap.event.types.leftMouseDown },
+        function(e)
+            local pos  = e:location()
+            local lx   = pos.x - mx
+            local ly   = pos.y - my
+            local kind = e:getType()
+
+            if kind == hs.eventtap.event.types.mouseMoved then
+                local row = rowAtY(ly)
+                if row then
+                    local rowY = PAD_Y + (row - 1) * ROW_H
+                    canvas:elementAttribute(HIGHLIGHT_IDX, "frame",
+                        { x = 3, y = rowY, w = MENU_W - 6, h = ROW_H })
+                    canvas:elementAttribute(HIGHLIGHT_IDX, "fillColor",
+                        { red = 0.25, green = 0.4, blue = 0.6, alpha = 0.85 })
+                else
+                    canvas:elementAttribute(HIGHLIGHT_IDX, "fillColor",
+                        { red = 0.25, green = 0.4, blue = 0.6, alpha = 0 })
+                end
+                return false
+
+            elseif kind == hs.eventtap.event.types.leftMouseDown then
+                local row = rowAtY(ly)
+                if row and lx >= 0 and lx <= MENU_W then
+                    local action = items[row].action
+                    closeMenu()
+                    action()
+                else
+                    closeMenu()
+                end
+                return true
+            end
+
+            return false
+        end
+    )
+    self._menuEventTap:start()
+
+    self._menuKeyTap = hs.eventtap.new(
+        { hs.eventtap.event.types.keyDown },
+        function(e)
+            if e:getKeyCode() == hs.keycodes.map["escape"] then
+                closeMenu()
+                return true
+            end
+            return false
+        end
+    )
+    self._menuKeyTap:start()
 end
+
+
 
 function obj:moveWindowById(windowId, direction)
     if not self._orderedWindowIds then self._orderedWindowIds = {} end
@@ -2297,8 +2336,9 @@ function obj:stop()
     for _, w in pairs(self._windowWatchers or {}) do w:stop() end
     self._windowWatchers = {}
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
-    if self._tipCanvas    then self._tipCanvas:delete();    self._tipCanvas    = nil end
-    if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
+    if self._menuCanvas   then self._menuCanvas:delete();   self._menuCanvas   = nil end
+    if self._menuEventTap then self._menuEventTap:stop();   self._menuEventTap = nil end
+    if self._menuKeyTap   then self._menuKeyTap:stop();     self._menuKeyTap   = nil end
     if self._buildDebounceTimer then self._buildDebounceTimer:stop(); self._buildDebounceTimer = nil end
      _iTermWindowsCache   = nil
      _iTermWindowsCacheTime = 0
@@ -2345,9 +2385,10 @@ function obj:init()
     self._spaceWatcher   = nil
     self._appWatcher     = nil
     self._sidebarVisible = false
-    self._tipCanvas      = nil
-    self._tipKey         = nil
     self._windowWatchers   = {}
+    self._menuCanvas   = nil
+    self._menuEventTap = nil
+    self._menuKeyTap   = nil
     self._customNames      = {}
     self._customNamesByPath = {}
     self._pendingPathNames  = {}

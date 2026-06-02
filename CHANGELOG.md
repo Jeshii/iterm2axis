@@ -24,3 +24,9 @@
 - Removed `buildSidebar` call from `bringWindowToFront` (redundant — windowFocused handles rebuild)
 - Removed `handleWindowMoveOrResize` from `windowFocused` subscriber (focus changes don't move windows, was causing 300ms debounced stall / beach ball)
 - Added 100ms TTL cache to `getITermWindows()` to avoid repeated `hs.window.allWindows()` calls during rapid sequential operations
+
+- Replaced `hs.chooser` context menu with a canvas-based popup menu (`showWindowMenu`) — avoids the chooser UI and provides native-feeling hover highlight and click handling via `hs.eventtap`
+- Removed `iTerm Settings` menu item (the `showPreferencesTip` overlay and `preferences_tip.png` asset)
+- Added `_menuCanvas`/`_menuEventTap`/`_menuKeyTap` state fields for the new context menu; cleaned up in `stop()` and `init()`
+- Added iTerm2 configuration section to README documenting the "Reuse previous session's directory" setting
+- Added keyboard shortcut labels (⌘⇧W, ⌘⇧[, etc.) to each canvas context menu item, right-aligned in dimmer text
