@@ -1784,17 +1784,21 @@ function obj:start()
             hs.eventtap.event.types.rightMouseDown,
         },
         function(event)
-            if not self.sidebarCanvas then return false end
+            if not self.sidebarCanvas or not self.sidebarCanvas:isShowing() then return false end
 
             local eventType = event:getType()
             local sf = self.sidebarCanvas:frame()
             local mouse = hs.mouse.absolutePosition()
 
-            local frontApp = hs.application.frontmostApplication()
-            local frontIsITerm = frontApp and frontApp:bundleID() == "com.googlecode.iterm2"
-            local inSidebar = self._sidebarVisible and frontIsITerm
+            local inSidebar = self._sidebarVisible
                 and mouse.x >= sf.x and mouse.x <= sf.x + sf.w
                 and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
+
+            -- Don't absorb if a non-iTerm window is on top of the canvas at the click point
+            local ok, winUnder = pcall(hs.window.atPoint, mouse)
+            if ok and winUnder and not isITerm(winUnder) then
+                return false
+            end
 
             if eventType == hs.eventtap.event.types.leftMouseDown then
                 if inSidebar then
