@@ -948,35 +948,6 @@ function obj:_doBuildSidebar()
             self.sidebarCanvas:mouseCallback(function(canvas, event, id, x, y)
                 if not self._sidebarVisible then return end
                 if event == "mouseDown" then
-                    for _, btn in ipairs(self._buttonFrames or {}) do
-                        if x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
-                            self.activeWindowId = btn.windowId
-                            stopFlashing(btn.windowId)
-                            local bgIdx = self._btnBgElements[btn.windowId]
-                            if bgIdx then
-                                self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(self.config.activeButtonColor))
-                            end
-                            for _, b in ipairs(self._buttonFrames) do
-                                if b.windowId ~= btn.windowId then
-                                    local otherBg = self._btnBgElements[b.windowId]
-                                    if otherBg then
-                                        self.sidebarCanvas:elementAttribute(otherBg, "fillColor", color(self.config.buttonColor))
-                                    end
-                                end
-                            end
-                            local win = hs.window.get(btn.windowId)
-                            if win then
-                                pcall(function()
-                                    local app = hs.application.get("com.googlecode.iterm2")
-                                    if app then app:activate() end
-                                    win:raise()
-                                    win:focus()
-                                end)
-                            end
-                            hs.timer.doAfter(0.05, function() self:syncCanvasLevel() end)
-                            break
-                        end
-                    end
                     self:handleSidebarClick(x, y, false)
                 end
             end)
@@ -1845,6 +1816,51 @@ function obj:start()
     )
     self._rightClickTap:start()
 
+    -- Left-click eventtap: intercept sidebar clicks before canvas mouseCallback
+    if self._leftClickTap then self._leftClickTap:stop() end
+    self._leftClickTap = hs.eventtap.new(
+        { hs.eventtap.event.types.leftMouseDown },
+        function(e)
+            if not self._sidebarVisible then return false end
+            local sf = self.sidebarCanvas and self.sidebarCanvas:frame()
+            if not sf then return false end
+            local mouse = e:location()
+            if mouse.x >= sf.x and mouse.x <= sf.x + sf.w and
+               mouse.y >= sf.y and mouse.y <= sf.y + sf.h then
+                local lx = mouse.x - sf.x
+                local ly = mouse.y - sf.y
+                for _, btn in ipairs(self._buttonFrames or {}) do
+                    if lx >= btn.x and lx <= btn.x + btn.w and
+                       ly >= btn.y and ly <= btn.y + btn.h then
+                        self.activeWindowId = btn.windowId
+                        stopFlashing(btn.windowId)
+                        if self._btnBgElements then
+                            for wid, bgIdx in pairs(self._btnBgElements) do
+                                local c = (wid == btn.windowId)
+                                    and self.config.activeButtonColor
+                                    or self.config.buttonColor
+                                self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
+                            end
+                        end
+                        local win = hs.window.get(btn.windowId)
+                        if win then
+                            pcall(function()
+                                local app = hs.application.get("com.googlecode.iterm2")
+                                if app then app:activate() end
+                                win:raise()
+                                win:focus()
+                            end)
+                        end
+                        hs.timer.doAfter(0.05, function() self:syncCanvasLevel() end)
+                        return true
+                    end
+                end
+            end
+            return false
+        end
+    )
+    self._leftClickTap:start()
+
     if self._winWatcher then self._winWatcher:stop() end
     self._winWatcher = hs.window.filter.new("iTerm2")
     self._winWatcher:subscribe("windowCreated", function(win)
@@ -1927,8 +1943,17 @@ function obj:start()
     end)
     self._winWatcher:subscribe("windowFocused", function(win)
         if win and isITerm(win) then
-            self.activeWindowId = win:id()
-            stopFlashing(win:id())
+            local winId = win:id()
+            self.activeWindowId = winId
+            stopFlashing(winId)
+            if self.sidebarCanvas and self._btnBgElements then
+                for wid, bgIdx in pairs(self._btnBgElements) do
+                    local c = (wid == winId)
+                        and self.config.activeButtonColor
+                        or self.config.buttonColor
+                    self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
+                end
+            end
             hs.timer.doAfter(0.05, function()
                 self:syncCanvasLevel()
             end)
@@ -2077,6 +2102,7 @@ function obj:stop()
         hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
     end
     if self._appWatcher    then self._appWatcher:stop();    self._appWatcher    = nil end
+    if self._leftClickTap  then self._leftClickTap:stop();  self._leftClickTap  = nil end
     if self._rightClickTap then self._rightClickTap:stop(); self._rightClickTap = nil end
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
@@ -2125,6 +2151,7 @@ function obj:init()
     self._resizeDebounceTimer  = nil
     self._buildDebounceTimer   = nil
     self._pendingSidebarFrame  = nil
+    self._leftClickTap   = nil
     self._rightClickTap  = nil
     self._winWatcher     = nil
     self._screenWatcher  = nil
