@@ -1,5 +1,11 @@
 ## 2026-06-02
 
+- Replaced `hs.dialog.textPrompt` with an inline vim-style rename bar at the bottom of the sidebar — type `⌘⇧W` or right-click → Rename to show the bar, `Return` to commit, `Escape` to cancel, `⌘V` to paste, `⌦` to clear
+- Added rename state management (`startRenameMode`, `commitRename`, `cancelRenameMode`) with global `hs.eventtap` key capture and a 0.5s blinking cursor
+- Added `_saveCustomName` helper shared by both dialog and bar rename paths
+- Added `BAR_H = 18` constant reserving space for the rename bar at the bottom of the canvas
+- Rename mode auto-cancels on: mouse click, iTerm2 deactivation, screen change, or `stop()`
+
 - Fixed clicks being swallowed by sidebar canvas when a floating app (e.g. Calendar) overlapped it: disabled `canvasMouseEvents` (sidebar no longer captures clicks at the OS level)
 - Removed redundant `mouseCallback` — all click handling is now done by `_leftClickTap` / `_rightClickTap` eventtaps
 - Changed `_leftClickTap` guard from `frontmostApplication()` to walking `hs.window.orderedWindows()` — finds the first window actually covering the click coordinate, so clicks pass through to floating apps above the canvas at that exact point

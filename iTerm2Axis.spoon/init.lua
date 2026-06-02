@@ -132,6 +132,8 @@ local function color(c)
     return { red = c.red, green = c.green, blue = c.blue, alpha = c.alpha }
 end
 
+local BAR_H = 18
+
 -- Parse iTerm2 window title into its components.
 -- Handles formats:
 --   "user@host: /full/path"   (shell integration with host + PWD)
@@ -1105,6 +1107,29 @@ function obj:_doBuildSidebar()
                 y = y + cfg.windowButtonHeight + 4
             end
 
+            -- Append rename bar elements (hidden by default)
+            self.sidebarCanvas:appendElements({
+                type = "rectangle",
+                fillColor = { red = 0.1, green = 0.1, blue = 0.18, alpha = 0 },
+                frame = { x = 0, y = sb.h - BAR_H, w = sb.w, h = BAR_H },
+            })
+            self._renameBarIdx = self.sidebarCanvas:elementCount()
+            self.sidebarCanvas:appendElements({
+                type = "text",
+                text = "",
+                textColor = { red = 1, green = 1, blue = 1, alpha = 0 },
+                textSize = 12,
+                frame = { x = 6, y = sb.h - BAR_H + 2, w = sb.w - 12, h = BAR_H - 4 },
+            })
+            self._renameTextIdx = self.sidebarCanvas:elementCount()
+
+            -- Restore rename bar state after rebuild if mode is active
+            if self._renameMode then
+                self:_updateRenameBar()
+                self.sidebarCanvas:elementAttribute(self._renameBarIdx, "fillColor", { red = 0.1, green = 0.1, blue = 0.18, alpha = 0.92 })
+                self.sidebarCanvas:elementAttribute(self._renameTextIdx, "textColor", { red = 1, green = 1, blue = 1, alpha = 1 })
+            end
+
             self._pendingSidebarFrame = nil
             if needsFullRebuild then
                 self.sidebarCanvas:show()
@@ -1306,31 +1331,23 @@ function obj:handleSidebarClick(x, y, rightClick)
 end
 
 function obj:renameWindow(windowId)
+    self:startRenameMode(windowId)
+end
+
+function obj:_saveCustomName(windowId, name)
     local win = hs.window.get(windowId)
-    local currentName = self._customNames[windowId] or (win and win:title()) or ""
-    local button, input = hs.dialog.textPrompt(
-        "Rename Window",
-        "Enter a custom name for this window:",
-        currentName,
-        "Rename",
-        "Cancel"
-    )
-    if button == "Rename" and input and input ~= "" then
-        self._customNames[windowId] = input
+    if name and name ~= "" then
+        self._customNames[windowId] = name
         hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
         local fullPath = _wdCache[windowId]
         if fullPath then
-            self._customNamesByPath[fullPath] = input
+            self._customNamesByPath[fullPath] = name
             hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
         else
-            self._pendingPathNames[windowId] = input
+            self._pendingPathNames[windowId] = name
             if win then getWindowWorkingDir(win) end
         end
-        hs.timer.doAfter(0.05, function()
-            self._lastSidebarSnapshot = nil
-            self:buildSidebar()
-        end)
-    elseif button == "Rename" and (not input or input == "") then
+    else
         self._customNames[windowId] = nil
         hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
         local fullPath = _wdCache[windowId]
@@ -1341,11 +1358,126 @@ function obj:renameWindow(windowId)
             self._pendingPathNames[windowId] = false
             if win then getWindowWorkingDir(win) end
         end
-        hs.timer.doAfter(0.05, function()
-            self._lastSidebarSnapshot = nil
-            self:buildSidebar()
-        end)
     end
+    hs.timer.doAfter(0.05, function()
+        self._lastSidebarSnapshot = nil
+        self:buildSidebar()
+    end)
+end
+
+function obj:startRenameMode(windowId)
+    if not self.sidebarCanvas then return end
+    if self._renameMode then self:cancelRenameMode() end
+
+    self._renameWindowId = windowId
+    self._renameBuffer   = self._customNames[windowId] or ""
+    self._renameMode     = true
+    self._cursorVisible  = true
+
+    self:_updateRenameBar()
+    if self._renameBarIdx then
+        self.sidebarCanvas:elementAttribute(self._renameBarIdx, "fillColor", { red = 0.1, green = 0.1, blue = 0.18, alpha = 0.92 })
+    end
+    if self._renameTextIdx then
+        self.sidebarCanvas:elementAttribute(self._renameTextIdx, "textColor", { red = 1, green = 1, blue = 1, alpha = 1 })
+    end
+
+    self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
+
+    self._renameEventTap = hs.eventtap.new(
+        { hs.eventtap.event.types.keyDown },
+        function(e) return self:_handleRenameKey(e) end
+    )
+    self._renameEventTap:start()
+
+    if self._renameBlink then self._renameBlink:stop() end
+    self._renameBlink = hs.timer.new(0.5, function()
+        if not self._renameMode then return end
+        self._cursorVisible = not self._cursorVisible
+        self:_updateRenameBar()
+    end)
+    self._renameBlink:start()
+end
+
+function obj:_updateRenameBar()
+    if not self._renameTextIdx or not self.sidebarCanvas then return end
+    local cursor = self._cursorVisible and "█" or " "
+    local display = "Rename: " .. self._renameBuffer .. cursor
+    self.sidebarCanvas:elementAttribute(self._renameTextIdx, "text", display)
+end
+
+function obj:_handleRenameKey(event)
+    if not self._renameMode then return false end
+
+    local code  = event:getKeyCode()
+    local flags = event:getFlags()
+    local char  = event:getCharacters(true) or ""
+
+    if code == hs.keycodes.map["return"] then
+        self:commitRename()
+        return true
+    elseif code == hs.keycodes.map["escape"] then
+        self:cancelRenameMode()
+        return true
+    elseif code == hs.keycodes.map["delete"] then
+        if #self._renameBuffer > 0 then
+            self._renameBuffer = self._renameBuffer:sub(1, -2)
+            self._cursorVisible = true
+            self:_updateRenameBar()
+        end
+        return true
+    elseif code == hs.keycodes.map["forwarddelete"] then
+        self._renameBuffer = ""
+        self._cursorVisible = true
+        self:_updateRenameBar()
+        return true
+    elseif flags.cmd and code == hs.keycodes.map["v"] then
+        local paste = hs.pasteboard.getContents() or ""
+        self._renameBuffer = self._renameBuffer .. paste
+        self._cursorVisible = true
+        self:_updateRenameBar()
+        return true
+    elseif flags.cmd or flags.ctrl then
+        return false
+    elseif not flags.alt and char ~= "" then
+        self._renameBuffer = self._renameBuffer .. char
+        self._cursorVisible = true
+        self:_updateRenameBar()
+        return true
+    end
+
+    return false
+end
+
+function obj:commitRename()
+    local windowId = self._renameWindowId
+    local name     = self._renameBuffer
+    self:cancelRenameMode()
+    self:_saveCustomName(windowId, name)
+end
+
+function obj:cancelRenameMode()
+    self._renameMode     = false
+    self._renameBuffer   = ""
+    self._renameWindowId = nil
+
+    if self._renameEventTap then
+        self._renameEventTap:stop()
+        self._renameEventTap = nil
+    end
+    if self._renameBlink then
+        self._renameBlink:stop()
+        self._renameBlink = nil
+    end
+
+    if self._renameBarIdx and self.sidebarCanvas then
+        self.sidebarCanvas:elementAttribute(self._renameBarIdx, "fillColor", { red = 0.1, green = 0.1, blue = 0.18, alpha = 0 })
+    end
+    if self._renameTextIdx and self.sidebarCanvas then
+        self.sidebarCanvas:elementAttribute(self._renameTextIdx, "textColor", { red = 1, green = 1, blue = 1, alpha = 0 })
+    end
+
+    self:syncCanvasLevel()
 end
 
 function obj:showWindowMenu(windowId)
@@ -1641,6 +1773,7 @@ function obj:handleWindowMoveOrResize()
         local screenChanged = (newScreen ~= self._currentScreen)
 
         if screenChanged then
+            if self._renameMode then self:cancelRenameMode() end
             for _, win in ipairs(wins) do
                 local id = win:id()
                 _wdCache[id]         = nil
@@ -1826,6 +1959,10 @@ function obj:start()
     self._leftClickTap = hs.eventtap.new(
         { hs.eventtap.event.types.leftMouseDown },
         function(e)
+            -- Cancel rename mode on any mouse click
+            if self._renameMode then
+                self:cancelRenameMode()
+            end
             if not self._sidebarVisible then return false end
             local sf = self.sidebarCanvas and self.sidebarCanvas:frame()
             if not sf then return false end
@@ -2003,8 +2140,11 @@ function obj:start()
     self._appWatcher = hs.application.watcher.new(function(appName, event, appObj)
       if event == hs.application.watcher.deactivated then
         local bid = appObj and appObj:bundleID()
-        if bid == "com.googlecode.iterm2" and self.sidebarCanvas then
-          self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
+        if bid == "com.googlecode.iterm2" then
+          if self._renameMode then self:cancelRenameMode() end
+          if self.sidebarCanvas then
+            self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
+          end
         end
       elseif event == hs.application.watcher.activated then
         local bid = appObj and appObj:bundleID()
@@ -2080,6 +2220,7 @@ function obj:start()
     if self._screenWatcher then self._screenWatcher:stop() end
     self._screenWatcher = hs.screen.watcher.new(function()
         hs.timer.doAfter(0.3, function()
+            if self._renameMode then self:cancelRenameMode() end
             self._pendingSidebarFrame = nil
             self._currentScreen = nil
             if self.sidebarCanvas then
@@ -2125,6 +2266,7 @@ function obj:start()
 end
 
 function obj:stop()
+    if self._renameMode then self:cancelRenameMode() end
     -- Flush any pending path-name assignments before clearing caches
     for winId, pending in pairs(self._pendingPathNames or {}) do
         local path = _wdCache[winId]
@@ -2231,6 +2373,14 @@ function obj:init()
      _ccCache   = {}
      _ccPending = {}
      _ccPathKey = {}
+     self._renameMode      = false
+     self._renameBuffer    = ""
+     self._renameWindowId  = nil
+     self._renameEventTap  = nil
+     self._renameBarIdx    = nil
+     self._renameTextIdx   = nil
+     self._renameBlink     = nil
+     self._cursorVisible   = true
      return self
 end
 
