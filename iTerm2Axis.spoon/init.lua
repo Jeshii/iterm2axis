@@ -169,10 +169,24 @@ local function parseTitleComponents(title)
     }
 end
 
+-- Extract a GitHub PR number from a Claude Code iTerm2 title.
+-- Claude Code injects "PR #NNNN" into the titlebar when working in a workspace.
+-- Example titles:
+--   "✦ ✦ ✦ PR #42 — user@host: ~/repo"
+--   "· PR #1234 — user@host: ~/repo"
+--   "🔔 PR #7 — user@host: ~/repo"
+-- Returns the PR number as an integer, or nil if not found.
+local function parsePRFromTitle(title)
+    if not title or title == "" then return nil end
+    local n = title:match("PR%s*#(%d+)")
+    return n and tonumber(n) or nil
+end
+
 -- Per-window git branch cache, keyed by windowId.
 -- Uses hs.task for async git lookups so buildSidebar never blocks.
 local _gitBranchCache   = {}  -- [windowId] = branch string or false
 local _gitBranchPending = {}  -- [windowId] = true (fetch in flight)
+local _gitWsNameCache   = {}  -- [windowId] = worktree leaf name string or false
 
 -- Per-window working directory cache, keyed by windowId.
 -- Invalidated on windowTitleChanged (which fires when PWD changes with shell integration).
@@ -247,18 +261,34 @@ local function getGitBranchForPath(path, winId)
             -- Chained fallback for detached HEAD / worktree (async, non-blocking)
             hs.task.new("/bin/sh", function(_, out, _)
                 _gitBranchPending[winId] = nil
-                local b = out and out:gsub("%s+$", "")
+                local b, ws
+                if out and out ~= "" then
+                    b, ws = out:match("^([^\t]+)\t?(.*)$")
+                    b  = b  and b:gsub("%s+$", "")
+                    ws = ws and ws:gsub("%s+$", "")
+                    if ws == "" then ws = nil end
+                end
                 _gitBranchCache[winId] = (b and b ~= "") and b or false
+                local wsLeaf = ws and ws:match("([^/]+)%s*$")
+                _gitWsNameCache[winId] = (wsLeaf and wsLeaf ~= "") and wsLeaf or false
                 hs.timer.doAfter(0, function()
                     if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
                         obj:buildSidebar()
                     end
                 end)
-            end, {"-c", "git -C '" .. path .. "' worktree list --porcelain 2>/dev/null | grep 'branch' | head -1 | sed 's/branch refs\\/heads\\///'"}):start()
+            end, {"-c", [[
+                cd ']] .. path .. [[' 2>/dev/null || exit 1
+                TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+                git worktree list --porcelain 2>/dev/null | awk -v wt="$TOPLEVEL" '
+                    /^worktree / { cur=$2; next }
+                    /^branch /  { if (cur==wt) { sub("^branch refs/heads/",""); print $0"\t"cur } }
+                ' | head -1
+            ]]}):start()
             return
         end
         _gitBranchPending[winId] = nil
         _gitBranchCache[winId] = (branch and branch ~= "") and branch or false
+        _gitWsNameCache[winId] = false
         hs.timer.doAfter(0, function()
             if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
                 obj:buildSidebar()
@@ -710,6 +740,7 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData)
             tostring(claudeState(win) or ""),
             tostring(fullPath),
             tostring(_gitBranchCache[id] or ""),
+            tostring(_gitWsNameCache[id] or ""),
             ocSnippet(opencodeData, fullPath),
             ccSnippet(id),
         }, "\t"))
@@ -721,11 +752,35 @@ local function sidebarStructureSnapshot(wins, sbW, sbH)
     return #wins .. ":" .. sbW .. "x" .. sbH
 end
 
-local function buttonStructureKey(basename, branch, ocData, ccData)
+local function buttonStructureKey(basename, branch, prFromTitle, wsName, ocData, ccData)
     return (basename and "1" or "0")
-        .. (branch   and "1" or "0")
+        .. (branch    and "1" or "0")
+        .. (prFromTitle and "1" or "0")
+        .. (wsName    and "1" or "0")
         .. (ocData   and "1" or "0")
         .. (ccData   and "1" or "0")
+end
+
+-- Returns { text, color } for Line 3 based on workspace priority.
+-- Priority: PR number → worktree name → plain branch
+local function line3Display(wd)
+    if wd.prFromTitle then
+        return {
+            text  = "⎇ PR #" .. wd.prFromTitle,
+            color = { red = 0.85, green = 0.6, blue = 0.9, alpha = 0.95 },
+        }
+    elseif wd.wsName then
+        return {
+            text  = "⎇ ws:" .. wd.wsName,
+            color = { red = 0.9, green = 0.75, blue = 0.4, alpha = 0.9 },
+        }
+    elseif wd.branch then
+        return {
+            text  = "⎇ " .. wd.branch,
+            color = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
+        }
+    end
+    return nil
 end
 
 function obj:buildSidebar()
@@ -806,9 +861,12 @@ function obj:_doBuildSidebar()
         end
         local rawTitle = win:title() or ""
         local parts    = parseTitleComponents(rawTitle)
+        local prFromTitle = parsePRFromTitle(rawTitle)
+        if prFromTitle and prFromTitle <= 0 then prFromTitle = nil end
         local fullPath = getWindowWorkingDir(win)
         local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
         local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
+        local wsName = _gitWsNameCache[winId] or nil
         local label = self._customNames[winId]
             or parts.host
             or basename
@@ -831,22 +889,24 @@ function obj:_doBuildSidebar()
             end
         end
         local ccData = _ccCache[winId]
-        local bKey = buttonStructureKey(basename, branch, ocData, ccData)
+        local bKey = buttonStructureKey(basename, branch, prFromTitle, wsName, ocData, ccData)
 
         if self._btnStructureKeys[winId] ~= bKey then
             needsAnyWindowRebuild = true
         end
 
         winData[i] = {
-            win      = win,
-            winId    = winId,
-            btnColor = btnColor,
-            label    = label,
-            basename = basename,
-            branch   = branch,
-            ocData   = ocData,
-            ccData   = ccData,
-            bKey     = bKey,
+            win         = win,
+            winId       = winId,
+            btnColor    = btnColor,
+            label       = label,
+            basename    = basename,
+            branch      = branch,
+            wsName      = wsName,
+            prFromTitle = prFromTitle,
+            ocData      = ocData,
+            ccData      = ccData,
+            bKey        = bKey,
         }
     end
 
@@ -935,13 +995,14 @@ function obj:_doBuildSidebar()
                     elemIdx = elemIdx + 1
                 end
 
-                -- ── Line 3: git branch ──
-                if wd.branch then
+                -- ── Line 3: git branch / workspace / PR ──
+                local l3 = line3Display(wd)
+                if l3 then
                     self.sidebarCanvas:appendElements({
                         type          = "text",
                         frame         = { x = textX, y = y + 38, w = textW, h = 13 },
-                        text          = "⎇ " .. wd.branch,
-                        textColor     = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
+                        text          = l3.text,
+                        textColor     = l3.color,
                         textSize      = 10,
                         textAlignment = "left",
                     })
@@ -984,7 +1045,8 @@ function obj:_doBuildSidebar()
                     if wd.ccData.tokensIn > 0 then
                         tokStr = fmtTokens(wd.ccData.tokensIn) .. "▲ " .. fmtTokens(wd.ccData.tokensOut) .. "▼"
                     end
-                    local pr = self._ghAvailable and getOpenPRForWindow(wd.win) or nil
+                    local pr = wd.prFromTitle and { number = wd.prFromTitle, title = "" }
+                            or (self._ghAvailable and getOpenPRForWindow(wd.win) or nil)
                     local prStr = pr and ("#" .. pr.number) or ""
                     local segments = {}
                     if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
@@ -1042,8 +1104,8 @@ function obj:_doBuildSidebar()
                         self.sidebarCanvas:elementAttribute(map.line2, "text", baseText)
                     end
                     if map.line3 then
-                        local branchText = wd.branch and ("⎇ " .. wd.branch) or ""
-                        self.sidebarCanvas:elementAttribute(map.line3, "text", branchText)
+                        local l3 = line3Display(wd)
+                        self.sidebarCanvas:elementAttribute(map.line3, "text", l3 and l3.text or "")
                     end
                     if map.line4 then
                         local ocText = ""
@@ -1074,7 +1136,8 @@ function obj:_doBuildSidebar()
                                 tokStr = fmtTokens(wd.ccData.tokensIn) .. "▲ " .. fmtTokens(wd.ccData.tokensOut) .. "▼"
                             end
                             local win = hs.window.get(winId)
-                            local pr = win and self._ghAvailable and getOpenPRForWindow(win) or nil
+                            local pr = wd.prFromTitle and { number = wd.prFromTitle, title = "" }
+                                    or (win and self._ghAvailable and getOpenPRForWindow(win) or nil)
                             local prStr = pr and ("#" .. pr.number) or ""
                             local segments = {}
                             if modelShort ~= "" then table.insert(segments, "cc:" .. modelShort) end
@@ -1550,6 +1613,7 @@ function obj:handleWindowMoveOrResize()
                 local id = win:id()
                 _wdCache[id]         = nil
                 _gitBranchCache[id]  = nil
+                _gitWsNameCache[id]  = nil
                 _prCache[id]         = nil
                 _prBranchCache[id]   = nil
             end
@@ -1762,6 +1826,7 @@ function obj:start()
             end
             _gitBranchCache[id]   = nil
             _gitBranchPending[id] = nil
+            _gitWsNameCache[id]   = nil
             _prCache[id]         = nil
             _prBranchCache[id]   = nil
             _prPending[id]       = nil
@@ -1788,6 +1853,7 @@ function obj:start()
                 _ccCache[id]        = nil
                 _ccPathKey[id]      = nil
                 _gitBranchCache[id] = nil
+                _gitWsNameCache[id] = nil
             end
             local focusedWin = hs.window.focusedWindow()
             local isFocused  = focusedWin and focusedWin:id() == id
@@ -1979,6 +2045,7 @@ function obj:stop()
     if self._buildDebounceTimer then self._buildDebounceTimer:stop(); self._buildDebounceTimer = nil end
      _gitBranchCache   = {}
      _gitBranchPending = {}
+     _gitWsNameCache   = {}
      _prCache         = {}
      _prBranchCache   = {}
      _prPending       = {}
@@ -2039,6 +2106,7 @@ function obj:init()
     self._lastStructureSnapshot = nil
      _gitBranchCache   = {}
      _gitBranchPending = {}
+     _gitWsNameCache   = {}
      _prCache          = {}
      _prBranchCache    = {}
      _prPending        = {}
