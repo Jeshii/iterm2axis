@@ -1855,6 +1855,12 @@ function obj:start()
                         return true
                     end
                 end
+                -- In the sidebar area but not on a button:
+                -- only swallow if iTerm2 is already frontmost (prevents stealing focus)
+                local front = hs.application.frontmostApplication()
+                if front and front:bundleID() == "com.googlecode.iterm2" then
+                    return true
+                end
             end
             return false
         end
