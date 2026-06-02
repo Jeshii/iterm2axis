@@ -1,5 +1,8 @@
 ## 2026-06-02
 
+- Fixed clicks being swallowed by sidebar canvas when a floating app (e.g. Calendar) overlapped it: disabled `canvasMouseEvents` (sidebar no longer captures clicks at the OS level)
+- Removed redundant `mouseCallback` — all click handling is now done by `_leftClickTap` / `_rightClickTap` eventtaps
+- Changed `_leftClickTap` dead-zone guard from `frontmostApplication()` to `hs.window.orderedWindows()[1]` so clicks pass through to apps floating above the canvas when iTerm2 isn't the topmost window
 - Fixed canvas visibility bug: hide sidebar when all iTerm windows are closed/minimized, re-show when windows return
 - Added `windowMinimized` / `windowUnminimized` subscriptions to trigger rebuilds on minimize/unminimize
 - Added Git workspace / worktree support — parses PR numbers from iTerm2 title bar (`parsePRFromTitle`), detects worktree context from `git worktree list --porcelain` (_gitWsNameCache), displays workspace-aware Line 3 with color-coded states, short-circuits gh CLI when PR is already in the title

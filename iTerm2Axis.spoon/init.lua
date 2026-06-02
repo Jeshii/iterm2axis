@@ -944,13 +944,7 @@ function obj:_doBuildSidebar()
             self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
             self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
             self.sidebarCanvas:alpha(1)
-            self.sidebarCanvas:canvasMouseEvents(true, false, false, false)
-            self.sidebarCanvas:mouseCallback(function(canvas, event, id, x, y)
-                if not self._sidebarVisible then return end
-                if event == "mouseDown" then
-                    self:handleSidebarClick(x, y, false)
-                end
-            end)
+            self.sidebarCanvas:canvasMouseEvents(false, false, false, false)
             self._sidebarVisible = true
             self._lastStructureSnapshot = structureSnap
         elseif needsAnyWindowRebuild then
@@ -1856,9 +1850,10 @@ function obj:start()
                     end
                 end
                 -- In the sidebar area but not on a button:
-                -- only swallow if iTerm2 is already frontmost (prevents stealing focus)
-                local front = hs.application.frontmostApplication()
-                if front and front:bundleID() == "com.googlecode.iterm2" then
+                -- only swallow if iTerm2's window is truly on top (no floating app above the canvas)
+                local topWin = hs.window.orderedWindows()[1]
+                local topBID = topWin and topWin:application() and topWin:application():bundleID()
+                if topBID == "com.googlecode.iterm2" then
                     return true
                 end
             end
