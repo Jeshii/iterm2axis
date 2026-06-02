@@ -449,7 +449,8 @@ local function getOpenPRForWindow(win)
             if obj.sidebarCanvas and obj._sidebarEnabled then
                 obj:buildSidebar()
             end
-        end, {"-c", "cd '" .. fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"}):start()
+        end)
+    end, {"-c", "cd '" .. fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"}):start()
 
     return _prCache[winId] or nil
 end
