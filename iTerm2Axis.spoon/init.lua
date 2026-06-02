@@ -251,7 +251,7 @@ local function getWindowWorkingDir(win)
                 end
             end
         end
-        if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+        if obj.sidebarCanvas and obj._sidebarEnabled then
             obj:buildSidebar()
         end
     end, {"-e", script}):start()
@@ -286,11 +286,10 @@ local function getGitBranchForPath(path, winId)
                 local wsLeaf = ws and ws:match("([^/]+)%s*$")
                 _gitWsNameCache[winId] = (wsLeaf and wsLeaf ~= "") and wsLeaf or false
                 hs.timer.doAfter(0, function()
-                    if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+                    if obj.sidebarCanvas and obj._sidebarEnabled then
                         obj:buildSidebar()
                     end
-                end)
-            end, {"-c", [[
+                end, {"-c", [[
                 cd ']] .. path .. [[' 2>/dev/null || exit 1
                 TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
                 git worktree list --porcelain 2>/dev/null | awk -v wt="$TOPLEVEL" '
@@ -304,11 +303,10 @@ local function getGitBranchForPath(path, winId)
         _gitBranchCache[winId] = (branch and branch ~= "") and branch or false
         _gitWsNameCache[winId] = false
         hs.timer.doAfter(0, function()
-            if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+            if obj.sidebarCanvas and obj._sidebarEnabled then
                 obj:buildSidebar()
             end
-        end)
-    end, {"-C", path, "rev-parse", "--abbrev-ref", "HEAD"}):start()
+        end, {"-C", path, "rev-parse", "--abbrev-ref", "HEAD"}):start()
 
     return _gitBranchCache[winId] or nil
 end
@@ -446,11 +444,10 @@ local function getOpenPRForWindow(win)
         local ok, pr = pcall(hs.json.decode, stdout or "")
         _prCache[winId] = (ok and pr and pr.number) and pr or false
         hs.timer.doAfter(0, function()
-            if obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
+            if obj.sidebarCanvas and obj._sidebarEnabled then
                 obj:buildSidebar()
             end
-        end)
-    end, {"-c", "cd '" .. fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"}):start()
+        end, {"-c", "cd '" .. fullPath .. "' && perl -e 'alarm shift; exec @ARGV' 3 gh pr view --json number,title 2>/dev/null"}):start()
 
     return _prCache[winId] or nil
 end
@@ -458,7 +455,7 @@ end
 function obj:_finalizeOpenCodeData(newData)
     self._opencodeData = newData
     self._opencodePending = false
-    if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+    if self.sidebarCanvas and self._sidebarEnabled then
         self:buildSidebar()
     end
 end
@@ -635,7 +632,7 @@ function obj:fetchClaudeCodeData()
                 end
             end
             self._claudeCodeData = newData
-            if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            if self.sidebarCanvas and self._sidebarEnabled then
                 self:buildSidebar()
             end
         end
@@ -1134,7 +1131,7 @@ function obj:_doBuildSidebar()
             end
 
             self._pendingSidebarFrame = nil
-            if needsFullRebuild then
+            if needsFullRebuild and self._sidebarEnabled then
                 self.sidebarCanvas:show()
                 self._sidebarVisible = true
             end
@@ -1258,6 +1255,7 @@ end
 function obj:toggleSidebar()
     if self.sidebarCanvas and self._sidebarVisible then
         local sbf = self.sidebarCanvas:frame()
+        self._sidebarEnabled = false
         self.sidebarCanvas:hide()
         self._sidebarVisible = false
         for _, win in ipairs(getITermWindows()) do
@@ -1265,6 +1263,7 @@ function obj:toggleSidebar()
             win:setFrame({ x = sbf.x, y = f.y, w = f.w + self.config.sidebarWidth, h = f.h })
         end
     else
+        self._sidebarEnabled = true
         local wins = getITermWindows()
         if #wins > 0 then
             local sbf = self.sidebarCanvas:frame()
@@ -2282,7 +2281,7 @@ function obj:start()
                 needsRebuild = true
             end
         end
-        if needsRebuild and self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+        if needsRebuild and self.sidebarCanvas and self._sidebarEnabled then
             self._lastSidebarSnapshot = nil
             self:buildSidebar()
         end
@@ -2311,7 +2310,7 @@ function obj:start()
     self._spaceWatcher = hs.spaces.watcher.new(function()
         hs.timer.doAfter(0.15, function()
             self:syncCanvasLevel()
-            if self.sidebarCanvas and self.sidebarCanvas:isShowing() then
+            if self.sidebarCanvas and self._sidebarEnabled then
                 self:buildSidebar()
                 self:tileITermWindows()
             end
@@ -2410,7 +2409,8 @@ function obj:init()
     self._screenWatcher  = nil
     self._spaceWatcher   = nil
     self._appWatcher     = nil
-    self._sidebarVisible = false
+    self._sidebarVisible   = false
+    self._sidebarEnabled   = true
     self._windowWatchers   = {}
     self._menuCanvas   = nil
     self._menuEventTap = nil
