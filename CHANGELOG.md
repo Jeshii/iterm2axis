@@ -1,7 +1,6 @@
 ## 2026-06-02
 
-- Fixed `toggleSidebar` not reliably showing sidebar when toggling back on — now explicitly calls `show()`, clears snapshot caches to force full rebuild, and re-tiles windows + syncs canvas level
-- Fixed off-by-sidebar-width positioning bug in `toggleSidebar`: when the sidebar was hidden, iTerm windows sit at the content offset (`f.x = original.x + sidebarWidth`), so recomputing the anchor from `f.x` places the sidebar overlapping them. Now walks back by `sidebarWidth` (`f.x - sidebarWidth`) to find the true left edge before calling `refreshLayout`
+- Fixed `toggleSidebar` bug: on hide, iTerm windows now expand left to fill the vacated sidebar area; on show, sidebar position is read directly from the existing canvas frame instead of using a broken heuristic that subtracted `sidebarWidth` from iTerm's current X
 
 - Fixed right-click context menu showing duplicate entries (Rename through Move to Bottom appeared twice in `showWindowMenu` items table)
 

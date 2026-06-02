@@ -1257,21 +1257,22 @@ end
 
 function obj:toggleSidebar()
     if self.sidebarCanvas and self._sidebarVisible then
+        local sbf = self.sidebarCanvas:frame()
         self.sidebarCanvas:hide()
         self._sidebarVisible = false
+        for _, win in ipairs(getITermWindows()) do
+            local f = win:frame()
+            win:setFrame({ x = sbf.x, y = f.y, w = f.w + self.config.sidebarWidth, h = f.h })
+        end
     else
-        -- When sidebar was hidden, iTerm windows sit at content-area x.
-        -- Walk back by sidebarWidth to find the true left anchor.
         local wins = getITermWindows()
         if #wins > 0 then
-            local f = wins[1]:frame()
-            local sf = wins[1]:screen():frame()
-            local sidebarX = math.max(f.x - self.config.sidebarWidth, sf.x)
+            local sbf = self.sidebarCanvas:frame()
             self._pendingSidebarFrame = {
-                x = sidebarX,
-                y = f.y,
+                x = sbf.x,
+                y = sbf.y,
                 w = self.config.sidebarWidth,
-                h = f.h
+                h = sbf.h
             }
             self._currentScreen = wins[1]:screen()
         end
