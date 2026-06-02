@@ -1134,10 +1134,6 @@ function obj:_doBuildSidebar()
             end
 
             self._pendingSidebarFrame = nil
-            if needsFullRebuild and self._sidebarEnabled then
-                self.sidebarCanvas:show()
-                self._sidebarVisible = true
-            end
         else
             -- ── In-place update path: elementAttribute calls only ──
             self._buttonFrames = {}
@@ -1213,6 +1209,12 @@ function obj:_doBuildSidebar()
 
     self._buildPending = false
     self:syncCanvasLevel()
+
+    -- Show canvas AFTER level is set so it renders on top of iTerm windows
+    if needsFullRebuild and self._sidebarEnabled then
+        self.sidebarCanvas:show()
+        self._sidebarVisible = true
+    end
 
     if not ok then
         hs.printf("buildSidebar crashed: %s", tostring(err))
