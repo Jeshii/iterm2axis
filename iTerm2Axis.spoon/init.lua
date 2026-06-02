@@ -1296,6 +1296,7 @@ function obj:toggleSidebar()
         self._lastStructureSnapshot = nil
         self._lastSidebarSnapshot = nil
         self:refreshLayout()
+        self:tileITermWindows()
         self:syncCanvasLevel()
         hs.timer.doAfter(0.5, function() self._toggleLock = false end)
     end
