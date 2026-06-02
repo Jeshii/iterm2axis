@@ -1281,10 +1281,6 @@ function obj:toggleSidebar()
         self._lastStructureSnapshot = nil
         self._lastSidebarSnapshot = nil
         self:refreshLayout()
-        if self.sidebarCanvas then
-            self.sidebarCanvas:show()
-            self._sidebarVisible = true
-        end
         self:tileITermWindows()
         self:syncCanvasLevel()
     end
