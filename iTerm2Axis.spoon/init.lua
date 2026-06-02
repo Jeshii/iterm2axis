@@ -1241,6 +1241,7 @@ end
 
 function obj:tileITermWindows()
     if not self.sidebarCanvas then return end
+    if not self._sidebarEnabled then return end
     local sf = self.sidebarCanvas:frame()
     local screen = self:getScreen()
     local screenFrame = screen:frame()
@@ -1273,6 +1274,7 @@ end
 
 function obj:toggleSidebar()
     if self.sidebarCanvas and self._sidebarVisible then
+        self._toggleLock = true
         local sbf = self.sidebarCanvas:frame()
         self._sidebarEnabled = false
         self.sidebarCanvas:hide()
@@ -1281,7 +1283,9 @@ function obj:toggleSidebar()
             local f = win:frame()
             win:setFrame({ x = sbf.x, y = f.y, w = f.w + self.config.sidebarWidth, h = f.h })
         end
+        hs.timer.doAfter(0.5, function() self._toggleLock = false end)
     else
+        self._toggleLock = true
         self._sidebarEnabled = true
         local wins = getITermWindows()
         if #wins > 0 and self.sidebarCanvas then
@@ -1299,6 +1303,7 @@ function obj:toggleSidebar()
         self:refreshLayout()
         self:tileITermWindows()
         self:syncCanvasLevel()
+        hs.timer.doAfter(0.5, function() self._toggleLock = false end)
     end
 end
 
@@ -1844,6 +1849,7 @@ function obj:handleWindowMoveOrResize()
         self._resizeDebounceTimer:stop()
     end
     self._resizeDebounceTimer = hs.timer.doAfter(0.3, function()
+        if self._toggleLock then return end
         local wins = getITermWindows()
         if #wins == 0 then return end
 
@@ -2057,11 +2063,18 @@ function obj:start()
             local mouse = e:location()
             if mouse.x >= sf.x and mouse.x <= sf.x + sf.w and
                mouse.y >= sf.y and mouse.y <= sf.y + sf.h then
-                -- Simple frontmost check instead of orderedWindows walk
-                local frontApp = hs.application.frontmostApplication()
-                if not frontApp or frontApp:bundleID() ~= "com.googlecode.iterm2" then
-                    return false
-                end
+                 local clickingITerm = false
+                 local clickPt = hs.geometry.point(mouse.x, mouse.y)
+                 for _, w in ipairs(hs.window.orderedWindows()) do
+                     if w:frame():contains(clickPt) then
+                         local app = w:application()
+                         if app and app:bundleID() == "com.googlecode.iterm2" then
+                             clickingITerm = true
+                         end
+                         break
+                     end
+                 end
+                 if not clickingITerm then return false end
                 local lx = mouse.x - sf.x
                 local ly = mouse.y - sf.y
                 for _, btn in ipairs(self._buttonFrames or {}) do
@@ -2203,11 +2216,11 @@ function obj:start()
     self._appWatcher = hs.application.watcher.new(function(appName, event, appObj)
       if event == hs.application.watcher.deactivated then
         local bid = appObj and appObj:bundleID()
-        if bid == "com.googlecode.iterm2" then
-          if self._renameMode then self:cancelRenameMode() end
-          if self.sidebarCanvas then
-            self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
-          end
+         if bid == "com.googlecode.iterm2" then
+           if self._renameMode then self:cancelRenameMode() end
+           if self.sidebarCanvas then
+             self.sidebarCanvas:level(hs.canvas.windowLevels.floating - 1)
+           end
         end
       elseif event == hs.application.watcher.activated then
         local bid = appObj and appObj:bundleID()
@@ -2400,8 +2413,9 @@ function obj:init()
     self._screenWatcher  = nil
     self._spaceWatcher   = nil
     self._appWatcher     = nil
-    self._sidebarVisible   = false
-    self._sidebarEnabled   = true
+     self._sidebarVisible   = false
+     self._sidebarEnabled   = true
+     self._toggleLock       = false
     self._windowWatchers   = {}
     self._menuCanvas   = nil
     self._menuEventTap = nil

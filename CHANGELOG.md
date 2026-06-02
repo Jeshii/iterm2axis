@@ -1,7 +1,8 @@
 ## 2026-06-03
 
-- Fixed `_leftClickTap`: replaced fragile `hs.window.orderedWindows()` walk with a single upfront `frontmostApplication()` check — the old loop broke on the first iTerm2 window in z-order regardless of whether that window covered the click target, causing clicks to be absorbed or passed through incorrectly
-- Fixed `_leftClickTap`: "in sidebar but not on button" path now simply returns `true` (swallow) since the frontmost check already confirmed iTerm2 is active
+- Fixed toggle sidebar loop: added `_toggleLock` flag that suppresses drift detection in `handleWindowMoveOrResize` during programmatic window moves from `toggleSidebar`; also added `_sidebarEnabled` guard to `tileITermWindows` to prevent stale geometry tiling when the sidebar is hidden
+- Fixed `_leftClickTap`: restored `hs.window.orderedWords()` walk to determine the topmost window at the click coordinate — the `frontmostApplication()` shortcut dropped all sidebar clicks when any other app had focus, even if iTerm2 windows covered the sidebar area
+- Fixed `_appWatcher` deactivation level: changed from `windowLevels.normal` to `windowLevels.floating - 1` for consistency with `syncCanvasLevel` (normal level gets buried under other app windows on recent macOS)
 - Fixed orphaned context menu taps: `_doBuildSidebar` now cleans up `_menuCanvas`/`_menuEventTap`/`_menuKeyTap` before any canvas rebuild, preventing stale global interceptors if a rebuild fires while the menu is open
 - Fixed sidebar visibility loss: `syncCanvasLevel` non-iTerm2 branch changed from `windowLevels.normal` to `windowLevels.floating - 1` — `normal` level can be buried behind iTerm2 windows on macOS Sonoma/Sequoia; `floating - 1` stays above most content while still yielding focus
 
