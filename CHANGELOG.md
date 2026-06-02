@@ -13,6 +13,10 @@
 
 ## 2026-06-02
 
+- Fixed syntax error in `getOpenPRForWindow`: args table (`{"-c", ...}`) was being passed as 3rd arg to `hs.timer.doAfter` instead of `hs.task.new` — same pattern fix as `getGitBranchForPath`
+
+- Added `_sidebarEnabled` guard to `syncCanvasLevel` for safety; added `sidebarCanvas` nil guard in `toggleSidebar` show branch to prevent potential crash
+
 - Fixed `toggleSidebar` bug: on hide, iTerm windows now expand left to fill the vacated sidebar area; on show, sidebar position is read directly from the existing canvas frame instead of using a broken heuristic that subtracted `sidebarWidth` from iTerm's current X
 
 - Fixed right-click context menu showing duplicate entries (Rename through Move to Bottom appeared twice in `showWindowMenu` items table)

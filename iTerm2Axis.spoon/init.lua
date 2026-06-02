@@ -1283,7 +1283,7 @@ function obj:toggleSidebar()
         end
     else
         local wins = getITermWindows()
-        if #wins > 0 then
+        if #wins > 0 and self.sidebarCanvas then
             local sbf = self.sidebarCanvas:frame()
             self._pendingSidebarFrame = {
                 x = sbf.x,
