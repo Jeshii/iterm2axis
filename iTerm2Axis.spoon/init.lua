@@ -1509,11 +1509,6 @@ function obj:showWindowMenu(windowId)
         { label = "Move Down",      shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x93", action = function() self:moveWindowById(windowId, 1) end },
         { label = "Move to Top",    shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x8C\xA5\xE2\x86\x91", action = function() self:moveWindowToExtent(windowId, "top") end },
         { label = "Move to Bottom", shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x8C\xA5\xE2\x86\x93", action = function() self:moveWindowToExtent(windowId, "bottom") end },
-        { label = "Rename",         shortcut = "\xE2\x8C\x98\xE2\x87\xA7E",        action = function() self:renameWindow(windowId) end },
-        { label = "Move Up",        shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x91", action = function() self:moveWindowById(windowId, -1) end },
-        { label = "Move Down",      shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x93", action = function() self:moveWindowById(windowId, 1) end },
-        { label = "Move to Top",    shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x8C\xA5\xE2\x86\x91", action = function() self:moveWindowToExtent(windowId, "top") end },
-        { label = "Move to Bottom", shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x8C\xA5\xE2\x86\x93", action = function() self:moveWindowToExtent(windowId, "bottom") end },
         { label = "Refresh Layout", shortcut = "\xE2\x8C\x98\xE2\x87\xA7R",        action = function() self:refreshLayout() end },
         { label = "Show/Hide Axis", shortcut = "\xE2\x8C\x98\xE2\x87\xA7B",        action = function() self:toggleSidebar() end },
     }

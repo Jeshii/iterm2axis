@@ -1,5 +1,7 @@
 ## 2026-06-02
 
+- Fixed right-click context menu showing duplicate entries (Rename through Move to Bottom appeared twice in `showWindowMenu` items table)
+
 - Fixed `⌘⇧N` new window hotkey: replaced `hs.application.find("iTerm2")` with `hs.application.get("com.googlecode.iterm2")` and added a 0.15s delay before sending `⌘N` so iTerm2 has time to gain focus
 - Revised default hotkeys: toggle sidebar `⌘⇧A` → `⌘⇧B`, rename `⌘⇧W` → `⌘⇧E`, move up/down `⌘⇧[/]` → `⌘⇧↑/↓`, move to top/bottom `⌘⇧↑/↓` → `⌘⇧⌥↑/↓`; updated context menu shortcut labels to match
 
