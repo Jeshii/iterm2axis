@@ -1241,6 +1241,16 @@ function obj:bringWindowToFront(windowId)
     if not win then return end
     stopFlashing(windowId)
     self.activeWindowId = windowId
+
+    if self.sidebarCanvas and self._btnBgElements then
+        for wid, bgIdx in pairs(self._btnBgElements) do
+            local c = (wid == windowId)
+                and self.config.activeButtonColor
+                or self.config.buttonColor
+            self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
+        end
+    end
+
     local ok = pcall(function()
         local app = hs.application.get("com.googlecode.iterm2")
         if app then app:activate() end
@@ -1270,7 +1280,8 @@ function obj:syncCanvasLevel()
         end
         targetWin = best
     end
-    if targetWin then
+    local frontApp = hs.application.frontmostApplication()
+    if frontApp and frontApp:bundleID() == "com.googlecode.iterm2" then
         self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
     else
         self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
@@ -1826,6 +1837,19 @@ function obj:start()
                 for _, btn in ipairs(self._buttonFrames or {}) do
                     if lx >= btn.x and lx <= btn.x + btn.w and
                        ly >= btn.y and ly <= btn.y + btn.h then
+                        -- Check if a non-iTerm2 window is covering this click point
+                        for _, win in ipairs(hs.window.orderedWindows()) do
+                            local f = win:frame()
+                            local bid = win:application() and win:application():bundleID()
+                            if bid ~= "com.googlecode.iterm2" then
+                                if mouse.x >= f.x and mouse.x <= f.x + f.w and
+                                   mouse.y >= f.y and mouse.y <= f.y + f.h then
+                                    return false
+                                end
+                            else
+                                break
+                            end
+                        end
                         self.activeWindowId = btn.windowId
                         stopFlashing(btn.windowId)
                         if self._btnBgElements then
@@ -1850,10 +1874,22 @@ function obj:start()
                     end
                 end
                 -- In the sidebar area but not on a button:
-                -- only swallow if iTerm2's window is truly on top (no floating app above the canvas)
-                local topWin = hs.window.orderedWindows()[1]
-                local topBID = topWin and topWin:application() and topWin:application():bundleID()
-                if topBID == "com.googlecode.iterm2" then
+                -- only swallow if no foreign window is covering this coordinate
+                local passThrough = false
+                for _, win in ipairs(hs.window.orderedWindows()) do
+                    local f = win:frame()
+                    local bid = win:application() and win:application():bundleID()
+                    if bid ~= "com.googlecode.iterm2" then
+                        if mouse.x >= f.x and mouse.x <= f.x + f.w and
+                           mouse.y >= f.y and mouse.y <= f.y + f.h then
+                            passThrough = true
+                            break
+                        end
+                    else
+                        break
+                    end
+                end
+                if not passThrough then
                     return true
                 end
             end
