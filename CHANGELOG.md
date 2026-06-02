@@ -7,6 +7,7 @@
 - Right-click handling moved to narrow `_rightClickTap` eventtap that only fires when iTerm2 is already frontmost
 - Removed `_levelPollTimer` (1s syncCanvasLevel poll) — now fully reactive via `_appWatcher`
 - mouseCallback paints highlight colors directly then focuses, bypassing `bringWindowToFront` & its internal `buildSidebar` entirely for instant click response
+- mouseCallback and `bringWindowToFront` both call `app:activate()` before `win:raise()`/`win:focus()` — activating iTerm2 via `hs.application` first is much faster from a cold (unfocused) start than going through Accessibility API alone
 - Removed `buildSidebar` call from `bringWindowToFront` (redundant — windowFocused handles rebuild)
 - Removed `handleWindowMoveOrResize` from `windowFocused` subscriber (focus changes don't move windows, was causing 300ms debounced stall / beach ball)
 - Added 100ms TTL cache to `getITermWindows()` to avoid repeated `hs.window.allWindows()` calls during rapid sequential operations

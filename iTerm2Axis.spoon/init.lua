@@ -965,7 +965,14 @@ function obj:_doBuildSidebar()
                                 end
                             end
                             local win = hs.window.get(btn.windowId)
-                            if win then pcall(function() win:raise(); win:focus() end) end
+                            if win then
+                                pcall(function()
+                                    local app = hs.application.get("com.googlecode.iterm2")
+                                    if app then app:activate() end
+                                    win:raise()
+                                    win:focus()
+                                end)
+                            end
                             hs.timer.doAfter(0.05, function() self:syncCanvasLevel() end)
                             break
                         end
@@ -1270,6 +1277,8 @@ function obj:bringWindowToFront(windowId)
     stopFlashing(windowId)
     self.activeWindowId = windowId
     local ok = pcall(function()
+        local app = hs.application.get("com.googlecode.iterm2")
+        if app then app:activate() end
         win:raise()
         win:focus()
     end)
