@@ -1,3 +1,10 @@
+## 2026-06-03
+
+- Fixed `_leftClickTap`: replaced fragile `hs.window.orderedWindows()` walk with a single upfront `frontmostApplication()` check — the old loop broke on the first iTerm2 window in z-order regardless of whether that window covered the click target, causing clicks to be absorbed or passed through incorrectly
+- Fixed `_leftClickTap`: "in sidebar but not on button" path now simply returns `true` (swallow) since the frontmost check already confirmed iTerm2 is active
+- Fixed orphaned context menu taps: `_doBuildSidebar` now cleans up `_menuCanvas`/`_menuEventTap`/`_menuKeyTap` before any canvas rebuild, preventing stale global interceptors if a rebuild fires while the menu is open
+- Fixed sidebar visibility loss: `syncCanvasLevel` non-iTerm2 branch changed from `windowLevels.normal` to `windowLevels.floating - 1` — `normal` level can be buried behind iTerm2 windows on macOS Sonoma/Sequoia; `floating - 1` stays above most content while still yielding focus
+
 ## 2026-06-02
 
 - Fixed `toggleSidebar` show bug: removed manual `sidebarCanvas:show()` after `refreshLayout()` — the canvas show is now handled by the debounced `_doBuildSidebar` (which fires 50ms later), preventing the show from hitting a stale or nil canvas reference before the rebuild completes

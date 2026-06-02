@@ -814,6 +814,20 @@ function obj:_doBuildSidebar()
     if self._buildPending then return end
     self._buildPending = true
 
+    -- Close any open context menu before rebuilding canvas
+    if self._menuCanvas then
+        self._menuCanvas:delete()
+        self._menuCanvas = nil
+    end
+    if self._menuEventTap then
+        self._menuEventTap:stop()
+        self._menuEventTap = nil
+    end
+    if self._menuKeyTap then
+        self._menuKeyTap:stop()
+        self._menuKeyTap = nil
+    end
+
     local wins = getITermWindows()
 
     if #wins == 0 then
@@ -1337,7 +1351,7 @@ function obj:syncCanvasLevel()
     if frontApp and frontApp:bundleID() == "com.googlecode.iterm2" then
         self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
     else
-        self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
+        self.sidebarCanvas:level(hs.canvas.windowLevels.floating - 1)
     end
 end
 
@@ -2043,24 +2057,16 @@ function obj:start()
             local mouse = e:location()
             if mouse.x >= sf.x and mouse.x <= sf.x + sf.w and
                mouse.y >= sf.y and mouse.y <= sf.y + sf.h then
+                -- Simple frontmost check instead of orderedWindows walk
+                local frontApp = hs.application.frontmostApplication()
+                if not frontApp or frontApp:bundleID() ~= "com.googlecode.iterm2" then
+                    return false
+                end
                 local lx = mouse.x - sf.x
                 local ly = mouse.y - sf.y
                 for _, btn in ipairs(self._buttonFrames or {}) do
                     if lx >= btn.x and lx <= btn.x + btn.w and
                        ly >= btn.y and ly <= btn.y + btn.h then
-                        -- Check if a non-iTerm2 window is covering this click point
-                        for _, win in ipairs(hs.window.orderedWindows()) do
-                            local f = win:frame()
-                            local bid = win:application() and win:application():bundleID()
-                            if bid ~= "com.googlecode.iterm2" then
-                                if mouse.x >= f.x and mouse.x <= f.x + f.w and
-                                   mouse.y >= f.y and mouse.y <= f.y + f.h then
-                                    return false
-                                end
-                            else
-                                break
-                            end
-                        end
                         self.activeWindowId = btn.windowId
                         stopFlashing(btn.windowId)
                         if self._btnBgElements then
@@ -2084,25 +2090,8 @@ function obj:start()
                         return true
                     end
                 end
-                -- In the sidebar area but not on a button:
-                -- only swallow if no foreign window is covering this coordinate
-                local passThrough = false
-                for _, win in ipairs(hs.window.orderedWindows()) do
-                    local f = win:frame()
-                    local bid = win:application() and win:application():bundleID()
-                    if bid ~= "com.googlecode.iterm2" then
-                        if mouse.x >= f.x and mouse.x <= f.x + f.w and
-                           mouse.y >= f.y and mouse.y <= f.y + f.h then
-                            passThrough = true
-                            break
-                        end
-                    else
-                        break
-                    end
-                end
-                if not passThrough then
-                    return true
-                end
+                -- In the sidebar area but not on a button: swallow the click
+                return true
             end
             return false
         end
