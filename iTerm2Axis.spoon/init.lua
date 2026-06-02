@@ -1504,13 +1504,13 @@ function obj:showWindowMenu(windowId)
     end
 
     local items = {
-        { label = "Rename",         shortcut = "\xE2\x8C\x98\xE2\x87\xA7W",        action = function() self:renameWindow(windowId) end },
-        { label = "Move Up",        shortcut = "\xE2\x8C\x98\xE2\x87\xA7[",        action = function() self:moveWindowById(windowId, -1) end },
-        { label = "Move Down",      shortcut = "\xE2\x8C\x98\xE2\x87\xA7]",        action = function() self:moveWindowById(windowId, 1) end },
-        { label = "Move to Top",    shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x91", action = function() self:moveWindowToExtent(windowId, "top") end },
-        { label = "Move to Bottom", shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x93", action = function() self:moveWindowToExtent(windowId, "bottom") end },
+        { label = "Rename",         shortcut = "\xE2\x8C\x98\xE2\x87\xA7E",        action = function() self:renameWindow(windowId) end },
+        { label = "Move Up",        shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x91", action = function() self:moveWindowById(windowId, -1) end },
+        { label = "Move Down",      shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x93", action = function() self:moveWindowById(windowId, 1) end },
+        { label = "Move to Top",    shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x8C\xA5\xE2\x86\x91", action = function() self:moveWindowToExtent(windowId, "top") end },
+        { label = "Move to Bottom", shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x8C\xA5\xE2\x86\x93", action = function() self:moveWindowToExtent(windowId, "bottom") end },
         { label = "Refresh Layout", shortcut = "\xE2\x8C\x98\xE2\x87\xA7R",        action = function() self:refreshLayout() end },
-        { label = "Show/Hide Axis", shortcut = "\xE2\x8C\x98\xE2\x87\xA7A",        action = function() self:toggleSidebar() end },
+        { label = "Show/Hide Axis", shortcut = "\xE2\x8C\x98\xE2\x87\xA7\\",        action = function() self:toggleSidebar() end },
     }
 
     local ROW_H    = 22
@@ -1899,14 +1899,14 @@ end
 function obj:bindHotkeys(mapping)
     local map = mapping or {}
 
-    local toggleMods, toggleKey         = table.unpack(map.toggle       or {{"cmd","shift"}, "A"})
+    local toggleMods, toggleKey         = table.unpack(map.toggle       or {{"cmd","shift"}, "\\"})
     local newWinMods, newWinKey         = table.unpack(map.newWindow    or {{"cmd","shift"}, "N"})
     local refreshMods, refreshKey       = table.unpack(map.refresh      or {{"cmd","shift"}, "R"})
-    local renameMods, renameKey         = table.unpack(map.renameWindow or {{"cmd","shift"}, "W"})
-    local moveUpMods, moveUpKey         = table.unpack(map.moveUp       or {{"cmd","shift"}, "["})
-    local moveDownMods, moveDownKey     = table.unpack(map.moveDown     or {{"cmd","shift"}, "]"})
-    local moveTopMods, moveTopKey       = table.unpack(map.moveToTop    or {{"cmd","shift"}, "up"})
-    local moveBottomMods, moveBottomKey = table.unpack(map.moveToBottom or {{"cmd","shift"}, "down"})
+    local renameMods, renameKey         = table.unpack(map.renameWindow or {{"cmd","shift"}, "E"})
+    local moveUpMods, moveUpKey         = table.unpack(map.moveUp       or {{"cmd","shift"}, "up"})
+    local moveDownMods, moveDownKey     = table.unpack(map.moveDown     or {{"cmd","shift"}, "down"})
+    local moveTopMods, moveTopKey       = table.unpack(map.moveToTop    or {{"cmd","shift","alt"}, "up"})
+    local moveBottomMods, moveBottomKey = table.unpack(map.moveToBottom or {{"cmd","shift","alt"}, "down"})
     local focusUpMods, focusUpKey       = table.unpack(map.focusUp      or {{"alt","cmd"}, "up"})
     local focusDownMods, focusDownKey   = table.unpack(map.focusDown    or {{"alt","cmd"}, "down"})
 
@@ -1915,11 +1915,13 @@ function obj:bindHotkeys(mapping)
     end)
 
     hs.hotkey.bind(newWinMods, newWinKey, function()
-        local iterm = hs.application.find("iTerm2")
+        local iterm = hs.application.get("com.googlecode.iterm2")
         if iterm then
             iterm:activate()
-            hs.eventtap.keyStroke({"cmd"}, "n")
-            hs.timer.doAfter(0.5, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
+            hs.timer.doAfter(0.15, function()
+                hs.eventtap.keyStroke({"cmd"}, "n")
+                hs.timer.doAfter(0.5, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
+            end)
         else
             hs.application.open("com.googlecode.iterm2")
             hs.timer.doAfter(1.0, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
