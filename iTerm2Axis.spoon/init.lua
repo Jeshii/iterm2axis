@@ -1274,21 +1274,16 @@ end
 
 function obj:toggleSidebar()
     if self.sidebarCanvas and self._sidebarVisible then
-        self._toggleLock = true
         local sbf = self.sidebarCanvas:frame()
-        self._sidebarEnabled = false
         self.sidebarCanvas:hide()
         self._sidebarVisible = false
         for _, win in ipairs(getITermWindows()) do
             local f = win:frame()
             win:setFrame({ x = sbf.x, y = f.y, w = f.w + self.config.sidebarWidth, h = f.h })
         end
-        hs.timer.doAfter(0.5, function() self._toggleLock = false end)
     else
-        self._toggleLock = true
-        self._sidebarEnabled = true
         local wins = getITermWindows()
-        if #wins > 0 and self.sidebarCanvas then
+        if #wins > 0 then
             local sbf = self.sidebarCanvas:frame()
             self._pendingSidebarFrame = {
                 x = sbf.x,

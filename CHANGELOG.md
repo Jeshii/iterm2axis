@@ -13,12 +13,6 @@
 
 ## 2026-06-02
 
-- Fixed `toggleSidebar` show bug: removed manual `sidebarCanvas:show()` after `refreshLayout()` — the canvas show is now handled by the debounced `_doBuildSidebar` (which fires 50ms later), preventing the show from hitting a stale or nil canvas reference before the rebuild completes
-- Fixed `_doBuildSidebar`: moved `canvas:show()` to after `syncCanvasLevel()` so the level is set before the canvas renders, preventing it from being buried behind iTerm windows on macOS
-- Fixed syntax error in `getOpenPRForWindow`: args table (`{"-c", ...}`) was being passed as 3rd arg to `hs.timer.doAfter` instead of `hs.task.new` — same pattern fix as `getGitBranchForPath`
-
-- Added `_sidebarEnabled` guard to `syncCanvasLevel` for safety; added `sidebarCanvas` nil guard in `toggleSidebar` show branch to prevent potential crash
-
 - Fixed `toggleSidebar` bug: on hide, iTerm windows now expand left to fill the vacated sidebar area; on show, sidebar position is read directly from the existing canvas frame instead of using a broken heuristic that subtracted `sidebarWidth` from iTerm's current X
 
 - Fixed right-click context menu showing duplicate entries (Rename through Move to Bottom appeared twice in `showWindowMenu` items table)
