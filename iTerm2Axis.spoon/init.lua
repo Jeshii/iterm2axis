@@ -801,6 +801,16 @@ function obj:_doBuildSidebar()
     self._buildPending = true
 
     local wins = getITermWindows()
+
+    if #wins == 0 then
+        if self.sidebarCanvas then
+            self.sidebarCanvas:hide()
+            self._sidebarVisible = false
+        end
+        self._buildPending = false
+        return
+    end
+
     local snap = sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData)
     if snap == self._lastSidebarSnapshot then
         self._buildPending = false
@@ -1838,6 +1848,20 @@ function obj:start()
             stopFlashing(id)
         end
         hs.timer.doAfter(0.3, function() self._lastStructureSnapshot = nil; self:buildSidebar() end)
+    end)
+    self._winWatcher:subscribe("windowMinimized", function()
+        hs.timer.doAfter(0.3, function()
+            self._lastStructureSnapshot = nil
+            self:buildSidebar()
+        end)
+    end)
+    self._winWatcher:subscribe("windowUnminimized", function(win)
+        if win then self:watchWindow(win) end
+        hs.timer.doAfter(0.3, function()
+            self._lastStructureSnapshot = nil
+            self:buildSidebar()
+            self:tileITermWindows()
+        end)
     end)
     self._winWatcher:subscribe("windowTitleChanged", function(win)
         local isCCStateChange
