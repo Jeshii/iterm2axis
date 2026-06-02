@@ -934,6 +934,19 @@ function obj:_doBuildSidebar()
             self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
             self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
             self.sidebarCanvas:alpha(1)
+            self.sidebarCanvas:canvasMouseEvents(true, false, false, false)
+            self.sidebarCanvas:mouseCallback(function(canvas, event, id, x, y)
+                if not self._sidebarVisible then return end
+                if event == "mouseDown" then
+                    self:handleSidebarClick(x, y, false)
+                    for _, btn in ipairs(self._buttonFrames or {}) do
+                        if x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
+                            self:bringWindowToFront(btn.windowId)
+                            break
+                        end
+                    end
+                end
+            end)
             self._sidebarVisible = true
             self._lastStructureSnapshot = structureSnap
         elseif needsAnyWindowRebuild then
@@ -1777,53 +1790,27 @@ end
 -- ─────────────────────────────────────────────
 
 function obj:start()
-    if self._mouseTap then self._mouseTap:stop() end
-    self._mouseTap = hs.eventtap.new(
-        {
-            hs.eventtap.event.types.leftMouseDown,
-            hs.eventtap.event.types.rightMouseDown,
-        },
-        function(event)
-            if not self.sidebarCanvas or not self.sidebarCanvas:isShowing() then return false end
-
-            local eventType = event:getType()
-            local sf = self.sidebarCanvas:frame()
-            local mouse = hs.mouse.absolutePosition()
-
-            local inSidebar = self._sidebarVisible
-                and mouse.x >= sf.x and mouse.x <= sf.x + sf.w
-                and mouse.y >= sf.y and mouse.y <= sf.y + sf.h
-
-            -- Don't absorb if a non-iTerm window is on top of the canvas at the click point
-            local ok, winUnder = pcall(hs.window.atPoint, mouse)
-            if ok and winUnder and not isITerm(winUnder) then
+    -- Right-click: narrow eventtap, only acts when iTerm2 is already frontmost
+    if self._rightClickTap then self._rightClickTap:stop() end
+    self._rightClickTap = hs.eventtap.new(
+        { hs.eventtap.event.types.rightMouseDown },
+        function(e)
+            if not self._sidebarVisible then return false end
+            local front = hs.application.frontmostApplication()
+            if not front or front:bundleID() ~= "com.googlecode.iterm2" then
                 return false
             end
-
-            if eventType == hs.eventtap.event.types.leftMouseDown then
-                if inSidebar then
-                    local lx, ly = mouse.x - sf.x, mouse.y - sf.y
-                    if self._buttonFrames then
-                        for _, btn in ipairs(self._buttonFrames) do
-                            if lx >= btn.x and lx <= btn.x + btn.w
-                            and ly >= btn.y and ly <= btn.y + btn.h then
-                                self:bringWindowToFront(btn.windowId)
-                                return true
-                            end
-                        end
-                    end
-                    return true
-                end
-            elseif eventType == hs.eventtap.event.types.rightMouseDown then
-                if inSidebar then
-                    self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, true)
-                    return true
-                end
+            local mouse = e:location()
+            local sf = self.sidebarCanvas:frame()
+            if mouse.x >= sf.x and mouse.x <= sf.x + sf.w and
+               mouse.y >= sf.y and mouse.y <= sf.y + sf.h then
+                self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, true)
+                return true
             end
             return false
         end
     )
-    self._mouseTap:start()
+    self._rightClickTap:start()
 
     if self._winWatcher then self._winWatcher:stop() end
     self._winWatcher = hs.window.filter.new("iTerm2")
@@ -2060,7 +2047,7 @@ function obj:stop()
         hs.settings.set(SETTINGS_KEY_NAMES_BY_PATH, self._customNamesByPath)
     end
     if self._appWatcher    then self._appWatcher:stop();    self._appWatcher    = nil end
-    if self._mouseTap      then self._mouseTap:stop();      self._mouseTap      = nil end
+    if self._rightClickTap then self._rightClickTap:stop(); self._rightClickTap = nil end
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
     if self._spaceWatcher then self._spaceWatcher:stop(); self._spaceWatcher = nil end
@@ -2107,7 +2094,7 @@ function obj:init()
     self._resizeDebounceTimer  = nil
     self._buildDebounceTimer   = nil
     self._pendingSidebarFrame  = nil
-    self._mouseTap       = nil
+    self._rightClickTap  = nil
     self._winWatcher     = nil
     self._screenWatcher  = nil
     self._spaceWatcher   = nil
