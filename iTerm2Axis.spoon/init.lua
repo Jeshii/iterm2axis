@@ -1268,7 +1268,7 @@ function obj:toggleSidebar()
     else
         self._sidebarEnabled = true
         local wins = getITermWindows()
-        if #wins > 0 then
+        if #wins > 0 and self.sidebarCanvas then
             local sbf = self.sidebarCanvas:frame()
             self._pendingSidebarFrame = {
                 x = sbf.x,
@@ -1320,6 +1320,7 @@ end
 
 function obj:syncCanvasLevel()
     if not self.sidebarCanvas then return end
+    if not self._sidebarEnabled then return end
     local targetWin = nil
     local focused = hs.window.focusedWindow()
     if focused and isITerm(focused) then
