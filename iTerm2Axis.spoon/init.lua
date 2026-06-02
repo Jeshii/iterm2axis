@@ -950,9 +950,23 @@ function obj:_doBuildSidebar()
                 if event == "mouseDown" then
                     for _, btn in ipairs(self._buttonFrames or {}) do
                         if x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
-                            self:bringWindowToFront(btn.windowId)
-                            self._lastSidebarSnapshot = nil
-                            self:_doBuildSidebar()
+                            self.activeWindowId = btn.windowId
+                            stopFlashing(btn.windowId)
+                            local bgIdx = self._btnBgElements[btn.windowId]
+                            if bgIdx then
+                                self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(self.config.activeButtonColor))
+                            end
+                            for _, b in ipairs(self._buttonFrames) do
+                                if b.windowId ~= btn.windowId then
+                                    local otherBg = self._btnBgElements[b.windowId]
+                                    if otherBg then
+                                        self.sidebarCanvas:elementAttribute(otherBg, "fillColor", color(self.config.buttonColor))
+                                    end
+                                end
+                            end
+                            local win = hs.window.get(btn.windowId)
+                            if win then pcall(function() win:raise(); win:focus() end) end
+                            hs.timer.doAfter(0.05, function() self:syncCanvasLevel() end)
                             break
                         end
                     end
@@ -1264,8 +1278,6 @@ function obj:bringWindowToFront(windowId)
     hs.timer.doAfter(0.05, function()
         self:syncCanvasLevel()
     end)
-
-    self:buildSidebar()
 end
 
 function obj:syncCanvasLevel()
@@ -1912,7 +1924,6 @@ function obj:start()
                 self:syncCanvasLevel()
             end)
         end
-        self:handleWindowMoveOrResize()
     end)
 
     -- Application focus watcher: drop canvas to normal when another app
