@@ -1,6 +1,7 @@
 ## 2026-06-02
 
 - Replaced `hs.dialog.textPrompt` with an inline vim-style rename bar at the bottom of the sidebar — type `⌘⇧W` or right-click → Rename to show the bar, `Return` to commit, `Escape` to cancel, `⌘V` to paste, `⌦` to clear
+- Rename bar: 40-char max length with visual `[max]` nudge, `▏` slim cursor, 6px bottom margin, paste strips newlines
 - Added rename state management (`startRenameMode`, `commitRename`, `cancelRenameMode`) with global `hs.eventtap` key capture and a 0.5s blinking cursor
 - Added `_saveCustomName` helper shared by both dialog and bar rename paths
 - Added `BAR_H = 18` constant reserving space for the rename bar at the bottom of the canvas

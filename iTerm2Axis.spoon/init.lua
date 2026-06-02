@@ -133,6 +133,8 @@ local function color(c)
 end
 
 local BAR_H = 18
+local BAR_BOTTOM_MARGIN = 6
+local MAX_RENAME_LEN = 40
 
 -- Parse iTerm2 window title into its components.
 -- Handles formats:
@@ -1108,10 +1110,11 @@ function obj:_doBuildSidebar()
             end
 
             -- Append rename bar elements (hidden by default)
+            local barY = sb.h - BAR_H - BAR_BOTTOM_MARGIN
             self.sidebarCanvas:appendElements({
                 type = "rectangle",
                 fillColor = { red = 0.1, green = 0.1, blue = 0.18, alpha = 0 },
-                frame = { x = 0, y = sb.h - BAR_H, w = sb.w, h = BAR_H },
+                frame = { x = 0, y = barY, w = sb.w, h = BAR_H },
             })
             self._renameBarIdx = self.sidebarCanvas:elementCount()
             self.sidebarCanvas:appendElements({
@@ -1119,7 +1122,7 @@ function obj:_doBuildSidebar()
                 text = "",
                 textColor = { red = 1, green = 1, blue = 1, alpha = 0 },
                 textSize = 12,
-                frame = { x = 6, y = sb.h - BAR_H + 2, w = sb.w - 12, h = BAR_H - 4 },
+                frame = { x = 6, y = barY + 2, w = sb.w - 12, h = BAR_H - 4 },
             })
             self._renameTextIdx = self.sidebarCanvas:elementCount()
 
@@ -1401,8 +1404,10 @@ end
 
 function obj:_updateRenameBar()
     if not self._renameTextIdx or not self.sidebarCanvas then return end
-    local cursor = self._cursorVisible and "█" or " "
-    local display = "Rename: " .. self._renameBuffer .. cursor
+    local cursor = self._cursorVisible and "▏" or " "
+    local atLimit = #self._renameBuffer >= MAX_RENAME_LEN
+    local prefix  = atLimit and "Rename [max]: " or "Rename: "
+    local display = prefix .. self._renameBuffer .. cursor
     self.sidebarCanvas:elementAttribute(self._renameTextIdx, "text", display)
 end
 
@@ -1432,17 +1437,20 @@ function obj:_handleRenameKey(event)
         self:_updateRenameBar()
         return true
     elseif flags.cmd and code == hs.keycodes.map["v"] then
-        local paste = hs.pasteboard.getContents() or ""
-        self._renameBuffer = self._renameBuffer .. paste
+        local paste = (hs.pasteboard.getContents() or ""):gsub("\n.*", "")
+        local combined = self._renameBuffer .. paste
+        self._renameBuffer = combined:sub(1, MAX_RENAME_LEN)
         self._cursorVisible = true
         self:_updateRenameBar()
         return true
     elseif flags.cmd or flags.ctrl then
         return false
     elseif not flags.alt and char ~= "" then
-        self._renameBuffer = self._renameBuffer .. char
-        self._cursorVisible = true
-        self:_updateRenameBar()
+        if #self._renameBuffer < MAX_RENAME_LEN then
+            self._renameBuffer = self._renameBuffer .. char
+            self._cursorVisible = true
+            self:_updateRenameBar()
+        end
         return true
     end
 
