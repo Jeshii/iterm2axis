@@ -106,7 +106,15 @@ local function isITerm(win)
     return bid == "com.googlecode.iterm2"
 end
 
+local _iTermWindowsCache = nil
+local _iTermWindowsCacheTime = 0
+local ITERM_CACHE_TTL = 0.1
+
 local function getITermWindows()
+    local now = hs.timer.secondsSinceEpoch()
+    if _iTermWindowsCache and (now - _iTermWindowsCacheTime) < ITERM_CACHE_TTL then
+        return _iTermWindowsCache
+    end
     local all = hs.window.allWindows()
     local result = {}
     for _, w in ipairs(all) do
@@ -115,6 +123,8 @@ local function getITermWindows()
         end
     end
     table.sort(result, function(a, b) return a:id() < b:id() end)
+    _iTermWindowsCache = result
+    _iTermWindowsCacheTime = now
     return result
 end
 
@@ -938,13 +948,15 @@ function obj:_doBuildSidebar()
             self.sidebarCanvas:mouseCallback(function(canvas, event, id, x, y)
                 if not self._sidebarVisible then return end
                 if event == "mouseDown" then
-                    self:handleSidebarClick(x, y, false)
                     for _, btn in ipairs(self._buttonFrames or {}) do
                         if x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
                             self:bringWindowToFront(btn.windowId)
+                            self._lastSidebarSnapshot = nil
+                            self:_doBuildSidebar()
                             break
                         end
                     end
+                    self:handleSidebarClick(x, y, false)
                 end
             end)
             self._sidebarVisible = true
@@ -1816,6 +1828,7 @@ function obj:start()
     self._winWatcher = hs.window.filter.new("iTerm2")
     self._winWatcher:subscribe("windowCreated", function(win)
         if win then self:watchWindow(win) end
+        _iTermWindowsCache = nil
         hs.timer.doAfter(0.3, function() self._lastStructureSnapshot = nil; self:buildSidebar(); self:tileITermWindows() end)
     end)
     self._winWatcher:subscribe("windowDestroyed", function(win)
@@ -1838,9 +1851,11 @@ function obj:start()
             _ccPathKey[id] = nil
             stopFlashing(id)
         end
+        _iTermWindowsCache = nil
         hs.timer.doAfter(0.3, function() self._lastStructureSnapshot = nil; self:buildSidebar() end)
     end)
     self._winWatcher:subscribe("windowMinimized", function()
+        _iTermWindowsCache = nil
         hs.timer.doAfter(0.3, function()
             self._lastStructureSnapshot = nil
             self:buildSidebar()
@@ -1848,6 +1863,7 @@ function obj:start()
     end)
     self._winWatcher:subscribe("windowUnminimized", function(win)
         if win then self:watchWindow(win) end
+        _iTermWindowsCache = nil
         hs.timer.doAfter(0.3, function()
             self._lastStructureSnapshot = nil
             self:buildSidebar()
@@ -2007,12 +2023,6 @@ function obj:start()
     end)
     self._spaceWatcher:start()
 
-    if self._levelPollTimer then self._levelPollTimer:stop() end
-    self._levelPollTimer = hs.timer.new(1, function()
-        self:syncCanvasLevel()
-    end)
-    self._levelPollTimer:start()
-
     self:buildSidebar()
     self:tileITermWindows()
 
@@ -2051,13 +2061,14 @@ function obj:stop()
     if self._winWatcher    then self._winWatcher:stop();    self._winWatcher    = nil end
     if self._screenWatcher then self._screenWatcher:stop(); self._screenWatcher = nil end
     if self._spaceWatcher then self._spaceWatcher:stop(); self._spaceWatcher = nil end
-    if self._levelPollTimer then self._levelPollTimer:stop(); self._levelPollTimer = nil end
     for _, w in pairs(self._windowWatchers or {}) do w:stop() end
     self._windowWatchers = {}
     if self.sidebarCanvas then self.sidebarCanvas:delete(); self.sidebarCanvas = nil end
     if self._tipCanvas    then self._tipCanvas:delete();    self._tipCanvas    = nil end
     if self._tipKey       then self._tipKey:delete();       self._tipKey       = nil end
     if self._buildDebounceTimer then self._buildDebounceTimer:stop(); self._buildDebounceTimer = nil end
+     _iTermWindowsCache   = nil
+     _iTermWindowsCacheTime = 0
      _gitBranchCache   = {}
      _gitBranchPending = {}
      _gitWsNameCache   = {}
@@ -2098,7 +2109,6 @@ function obj:init()
     self._winWatcher     = nil
     self._screenWatcher  = nil
     self._spaceWatcher   = nil
-    self._levelPollTimer = nil
     self._appWatcher     = nil
     self._sidebarVisible = false
     self._tipCanvas      = nil
@@ -2119,6 +2129,8 @@ function obj:init()
     self._btnStructureKeys   = {}
     self._lastSidebarSnapshot = nil
     self._lastStructureSnapshot = nil
+     _iTermWindowsCache   = nil
+     _iTermWindowsCacheTime = 0
      _gitBranchCache   = {}
      _gitBranchPending = {}
      _gitWsNameCache   = {}
