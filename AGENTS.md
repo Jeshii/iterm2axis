@@ -17,14 +17,14 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 
 ## Hotkeys
 
-- `⌘⇧A` — Show/hide the sidebar
+- `⌘⇧B` — Show/hide the sidebar
 - `⌘⇧N` — New iTerm window (auto-tiled)
 - `⌘⇧R` — Refresh layout
-- `⌘⇧W` — Rename selected window
-- `⌘⇧[` — Move selected window up in sidebar
-- `⌘⇧]` — Move selected window down in sidebar
-- `⌘⇧↑` — Move selected window to top of sidebar
-- `⌘⇧↓` — Move selected window to bottom of sidebar
+- `⌘⇧E` — Rename selected window
+- `⌘⇧↑` — Move selected window up in sidebar
+- `⌘⇧↓` — Move selected window down in sidebar
+- `⌘⇧⌥↑` — Move selected window to top of sidebar
+- `⌘⇧⌥↓` — Move selected window to bottom of sidebar
 - `⌥⌘↑` — Focus previous iTerm window (cycles)
 - `⌥⌘↓` — Focus next iTerm window (cycles)
 

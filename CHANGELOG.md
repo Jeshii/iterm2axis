@@ -1,7 +1,7 @@
 ## 2026-06-02
 
 - Fixed `⌘⇧N` new window hotkey: replaced `hs.application.find("iTerm2")` with `hs.application.get("com.googlecode.iterm2")` and added a 0.15s delay before sending `⌘N` so iTerm2 has time to gain focus
-- Revised default hotkeys: toggle sidebar `⌘⇧A` → `⌘⇧\`, rename `⌘⇧W` → `⌘⇧E`, move up/down `⌘⇧[/]` → `⌘⇧↑/↓`, move to top/bottom `⌘⇧↑/↓` → `⌘⇧⌥↑/↓`; updated context menu shortcut labels to match
+- Revised default hotkeys: toggle sidebar `⌘⇧A` → `⌘⇧B`, rename `⌘⇧W` → `⌘⇧E`, move up/down `⌘⇧[/]` → `⌘⇧↑/↓`, move to top/bottom `⌘⇧↑/↓` → `⌘⇧⌥↑/↓`; updated context menu shortcut labels to match
 
 - Replaced `hs.dialog.textPrompt` with an inline vim-style rename bar at the bottom of the sidebar — type `⌘⇧W` or right-click → Rename to show the bar, `Return` to commit, `Escape` to cancel, `⌘V` to paste, `⌦` to clear
 - Rename bar: 40-char max length with visual `[max]` nudge, `▏` slim cursor, 6px bottom margin, paste strips newlines

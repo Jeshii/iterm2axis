@@ -20,14 +20,14 @@ A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floatin
 hs.loadSpoon("iTerm2Axis")
 spoon.iTerm2Axis:start()
 spoon.iTerm2Axis:bindHotkeys({
-    toggle       = {{"cmd", "shift"}, "A"},
+    toggle       = {{"cmd", "shift"}, "B"},
     newWindow    = {{"cmd", "shift"}, "N"},
     refresh      = {{"cmd", "shift"}, "R"},
-    renameWindow = {{"cmd", "shift"}, "W"},
-    moveUp       = {{"cmd", "shift"}, "["},
-    moveDown     = {{"cmd", "shift"}, "]"},
-    moveToTop    = {{"cmd", "shift"}, "up"},
-    moveToBottom = {{"cmd", "shift"}, "down"},
+    renameWindow = {{"cmd", "shift"}, "E"},
+    moveUp       = {{"cmd", "shift"}, "up"},
+    moveDown     = {{"cmd", "shift"}, "down"},
+    moveToTop    = {{"cmd", "shift", "alt"}, "up"},
+    moveToBottom = {{"cmd", "shift", "alt"}, "down"},
     focusUp      = {{"alt", "cmd"}, "up"},
     focusDown    = {{"alt", "cmd"}, "down"},
 })
@@ -56,14 +56,14 @@ All hotkeys have built-in defaults but **are only registered when you call `bind
 
 | Key (default) | Mapping name | Action |
 |---|---|---|
-| ⌘⇧A | `toggle` | Show / hide the Axis sidebar |
+| ⌘⇧B | `toggle` | Show / hide the Axis sidebar |
 | ⌘⇧N | `newWindow` | Open a new iTerm2 window |
 | ⌘⇧R | `refresh` | Force-refresh the layout |
-| ⌘⇧W | `renameWindow` | Rename the active window |
-| ⌘⇧[ | `moveUp` | Move active window up the sidebar |
-| ⌘⇧] | `moveDown` | Move active window down the sidebar |
-| ⌘⇧↑ | `moveToTop` | Move active window to top of sidebar |
-| ⌘⇧↓ | `moveToBottom` | Move active window to bottom of sidebar |
+| ⌘⇧E | `renameWindow` | Rename the active window |
+| ⌘⇧↑ | `moveUp` | Move active window up the sidebar |
+| ⌘⇧↓ | `moveDown` | Move active window down the sidebar |
+| ⌘⇧⌥↑ | `moveToTop` | Move active window to top of sidebar |
+| ⌘⇧⌥↓ | `moveToBottom` | Move active window to bottom of sidebar |
 | ⌥⌘↑ | `focusUp` | Focus the previous window in the sidebar |
 | ⌥⌘↓ | `focusDown` | Focus the next window in the sidebar |
 
