@@ -289,7 +289,8 @@ local function getGitBranchForPath(path, winId)
                     if obj.sidebarCanvas and obj._sidebarEnabled then
                         obj:buildSidebar()
                     end
-                end, {"-c", [[
+                end)
+            end, {"-c", [[
                 cd ']] .. path .. [[' 2>/dev/null || exit 1
                 TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
                 git worktree list --porcelain 2>/dev/null | awk -v wt="$TOPLEVEL" '
@@ -306,7 +307,8 @@ local function getGitBranchForPath(path, winId)
             if obj.sidebarCanvas and obj._sidebarEnabled then
                 obj:buildSidebar()
             end
-        end, {"-C", path, "rev-parse", "--abbrev-ref", "HEAD"}):start()
+        end)
+    end, {"-C", path, "rev-parse", "--abbrev-ref", "HEAD"}):start()
 
     return _gitBranchCache[winId] or nil
 end
