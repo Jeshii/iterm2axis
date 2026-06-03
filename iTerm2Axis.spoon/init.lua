@@ -16,16 +16,18 @@ obj.license = "MIT - https://opensource.org/licenses/MIT"
 obj.homepage = "https://github.com/Jeshii/iterm2axis"
 
 local SETTINGS_KEY_ORDER = "iTerm2Axis.orderedWindowIds"
-local SETTINGS_KEY_NAMES = "iTerm2Axis.customNames"
 local SETTINGS_KEY_NAMES_BY_PATH = "iTerm2Axis.customNamesByPath"
 
 obj.config = {
 	debug = false,
 	sidebarWidth = 200,
+	sidebarSide = "left",
+	startHidden = false,
 	sidebarColor = { red = 0.12, green = 0.12, blue = 0.14, alpha = 0.95 },
 	buttonColor = { red = 0.2, green = 0.2, blue = 0.22, alpha = 1 },
 	activeButtonColor = { red = 0.25, green = 0.4, blue = 0.6, alpha = 1 },
 	textColor = { red = 0.9, green = 0.9, blue = 0.9, alpha = 1 },
+	dragHighlightColor = { red = 0.3, green = 0.7, blue = 0.4, alpha = 0.9 },
 
 	windowButtonHeight = 90, -- tall enough for 5 lines (opencode + claudecode)
 	padding = 8,
@@ -746,6 +748,34 @@ function obj:getScreen()
 	return screen
 end
 
+function obj:layoutFrames(screenFrame, anchorFrame)
+	local cfg = self.config
+	local isLeft = cfg.sidebarSide ~= "right"
+	local sw = cfg.sidebarWidth
+	local sf, af = screenFrame, anchorFrame
+
+	local sidebarX
+	if isLeft then
+		sidebarX = math.max(af.x, sf.x)
+	else
+		sidebarX = math.min(af.x + af.w, sf.x + sf.w) - sw
+	end
+
+	local contentX, contentW
+	if isLeft then
+		contentX = sidebarX + sw
+		contentW = (sf.x + sf.w) - contentX
+	else
+		contentX = sf.x
+		contentW = sidebarX - sf.x
+	end
+
+	return {
+		sidebar = { x = sidebarX, y = af.y, w = sw, h = af.h },
+		content = { x = contentX, y = af.y, w = contentW, h = af.h },
+	}
+end
+
 function obj:getSidebarAnchor()
 	if self._pendingSidebarFrame then
 		return self._pendingSidebarFrame
@@ -755,29 +785,9 @@ function obj:getSidebarAnchor()
 	end
 	local screen = self:getScreen()
 	local f = screen:frame()
-	return { x = f.x, y = f.y, w = self.config.sidebarWidth, h = f.h }
-end
 
-function obj:computeLayout()
-	local anchor = self:getSidebarAnchor()
-	local screen = self:getScreen()
-	local f = screen:frame()
-	local cfg = self.config
-
-	local sidebar = { x = anchor.x, y = anchor.y, w = cfg.sidebarWidth, h = anchor.h }
-	local iterm = {
-		x = anchor.x + cfg.sidebarWidth,
-		y = anchor.y,
-		w = (f.x + f.w) - (anchor.x + cfg.sidebarWidth),
-		h = anchor.h,
-	}
-
-	return {
-		screen = screen,
-		screenFrame = f,
-		sidebar = sidebar,
-		iterm = iterm,
-	}
+	local offset = (self.config.sidebarSide ~= "right") and 0 or (f.w - self.config.sidebarWidth)
+	return { x = f.x + offset, y = f.y, w = self.config.sidebarWidth, h = f.h }
 end
 
 -- ─────────────────────────────────────────────
@@ -869,6 +879,10 @@ function obj:buildSidebar()
 		self._buildDebounceTimer:stop()
 		self._buildDebounceTimer = nil
 	end
+	if self._menuCanvas then
+		self._needsRebuild = true
+		return
+	end
 	self._buildDebounceTimer = hs.timer.doAfter(0.05, function()
 		self._buildDebounceTimer = nil
 		self:_doBuildSidebar()
@@ -876,6 +890,10 @@ function obj:buildSidebar()
 end
 
 function obj:_doBuildSidebar()
+	if not self._sidebarVisible then
+		self._buildPending = false
+		return
+	end
 	if self._buildPending then
 		return
 	end
@@ -913,8 +931,7 @@ function obj:_doBuildSidebar()
 	end
 	self._lastSidebarSnapshot = snap
 
-	local layout = self:computeLayout()
-	local sb = layout.sidebar
+	local sb = self:layoutFrames(self:getScreen():frame(), self:getSidebarAnchor()).sidebar
 	local cfg = self.config
 
 	local structureSnap = sidebarStructureSnapshot(wins, sb.w, sb.h)
@@ -952,7 +969,11 @@ function obj:_doBuildSidebar()
 		local btnColor
 		local focusedWin = hs.window.focusedWindow()
 		local isFocused = focusedWin and focusedWin:id() == winId
-		if state == "waiting" and _flashState[winId] and not isFocused then
+		local isDragHover = self._dragActive and (winId == self._lastDragHoverId)
+
+		if isDragHover then
+			btnColor = cfg.dragHighlightColor
+		elseif state == "waiting" and _flashState[winId] and not isFocused then
 			btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
 		elseif state == "bell" and _flashState[winId] and not isFocused then
 			btnColor = cfg.bell.flashColor
@@ -1028,9 +1049,8 @@ function obj:_doBuildSidebar()
 			self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
 			self.sidebarCanvas:alpha(1)
 			self.sidebarCanvas:clickActivating(false)
-            local function noop() end
-            self.sidebarCanvas:mouseCallback(noop)
-			self._sidebarVisible = true
+			local function noop() end
+			self.sidebarCanvas:mouseCallback(noop)
 			self._lastStructureSnapshot = structureSnap
 		elseif needsAnyWindowRebuild then
 			self.sidebarCanvas:replaceElements()
@@ -1352,6 +1372,9 @@ end
 -- ─────────────────────────────────────────────
 
 function obj:tileITermWindows()
+	if not self._sidebarVisible then
+		return
+	end
 	if not self.sidebarCanvas then
 		return
 	end
@@ -1361,8 +1384,7 @@ function obj:tileITermWindows()
 	local sf = self.sidebarCanvas:frame()
 	local screen = self:getScreen()
 	local screenFrame = screen:frame()
-	local contentW = (screenFrame.x + screenFrame.w) - (sf.x + sf.w)
-	local newFrame = { x = sf.x + sf.w, y = sf.y, w = contentW, h = sf.h }
+	local newFrame = self:layoutFrames(screenFrame, sf).content
 	for _, win in ipairs(getITermWindows()) do
 		win:setFrame(newFrame)
 	end
@@ -1377,9 +1399,7 @@ function obj:refreshLayout()
 		end
 		local f = anchorWin:frame()
 		local sf = anchorWin:screen():frame()
-		local sidebarW = self.config.sidebarWidth
-		local sidebarX = math.max(f.x, sf.x)
-		self._pendingSidebarFrame = { x = sidebarX, y = f.y, w = sidebarW, h = f.h }
+		self._pendingSidebarFrame = self:layoutFrames(sf, f).sidebar
 		self._currentScreen = anchorWin:screen()
 		self._lastStructureSnapshot = nil
 	end
@@ -1395,8 +1415,13 @@ function obj:toggleSidebar()
 		self._sidebarVisible = false
 		for _, win in ipairs(getITermWindows()) do
 			local f = win:frame()
-			win:setFrame({ x = sbf.x, y = f.y, w = f.w + self.config.sidebarWidth, h = f.h })
+			local restoreX = (self.config.sidebarSide ~= "left") and f.x or sbf.x
+			win:setFrame({ x = restoreX, y = f.y, w = f.w + self.config.sidebarWidth, h = f.h })
 		end
+		self._toggleLock = true
+		hs.timer.doAfter(0.5, function()
+			self._toggleLock = false
+		end)
 	else
 		local wins = getITermWindows()
 		if #wins > 0 and self.sidebarCanvas then
@@ -1409,6 +1434,7 @@ function obj:toggleSidebar()
 			}
 			self._currentScreen = wins[1]:screen()
 		end
+		self._sidebarVisible = true
 		self._lastStructureSnapshot = nil
 		self._lastSidebarSnapshot = nil
 		self:refreshLayout()
@@ -1418,6 +1444,13 @@ function obj:toggleSidebar()
 			self._toggleLock = false
 		end)
 	end
+end
+
+function obj:toggleSide()
+	self.config.sidebarSide = (self.config.sidebarSide ~= "right") and "right" or "left"
+	self._pendingSidebarFrame = nil
+	self._lastStructureSnapshot = nil
+	self:refreshLayout()
 end
 
 function obj:bringWindowToFront(windowId)
@@ -1477,13 +1510,20 @@ end
 -- ─────────────────────────────────────────────
 
 local function isSidebarClickAllowed()
-    local front = hs.application.frontmostApplication()
-    if not front then return false end
-    local bid = front:bundleID()
-    return bid == "com.googlecode.iterm2" or bid == "org.hammerspoon.Hammerspoon"
+	local front = hs.application.frontmostApplication()
+	if not front then
+		return false
+	end
+	local bid = front:bundleID()
+	return bid == "com.googlecode.iterm2" or bid == "org.hammerspoon.Hammerspoon"
 end
 
 function obj:handleSidebarClick(x, y, rightClick)
+	local app = hs.application.get("com.googlecode.iterm2")
+	if app then
+		app:activate()
+	end
+
 	if not self._buttonFrames then
 		return
 	end
@@ -1492,9 +1532,30 @@ function obj:handleSidebarClick(x, y, rightClick)
 		if x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
 			if rightClick then
 				self:showWindowMenu(btn.windowId)
+				return
 			end
+			self.activeWindowId = btn.windowId
+			stopFlashing(btn.windowId)
+			if self._btnBgElements then
+				for wid, bgIdx in pairs(self._btnBgElements) do
+					local c = (wid == btn.windowId) and self.config.activeButtonColor or self.config.buttonColor
+					self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
+				end
+			end
+			local win = hs.window.get(btn.windowId)
+			if win then
+				win:raise()
+				win:focus()
+			end
+			hs.timer.doAfter(0.05, function()
+				self:syncCanvasLevel()
+			end)
 			return
 		end
+	end
+
+	if rightClick then
+		self:showGlobalMenu()
 	end
 end
 
@@ -1506,7 +1567,6 @@ function obj:_saveCustomName(windowId, name)
 	local win = hs.window.get(windowId)
 	if name and name ~= "" then
 		self._customNames[windowId] = name
-		hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
 		local fullPath = _wdCache[windowId]
 		if fullPath then
 			self._customNamesByPath[fullPath] = name
@@ -1519,7 +1579,6 @@ function obj:_saveCustomName(windowId, name)
 		end
 	else
 		self._customNames[windowId] = nil
-		hs.settings.set(SETTINGS_KEY_NAMES, self._customNames)
 		local fullPath = _wdCache[windowId]
 		if fullPath then
 			self._customNamesByPath[fullPath] = nil
@@ -1749,8 +1808,19 @@ function obj:showWindowMenu(windowId)
 				self:toggleSidebar()
 			end,
 		},
+		{
+			label = "Swap Side",
+			shortcut = "\xE2\x8C\x98\xE2\x87\xA7S",
+			action = function()
+				self:toggleSide()
+			end,
+		},
 	}
 
+	self:_renderPopupMenu(items)
+end
+
+function obj:_renderPopupMenu(items)
 	local ROW_H = 22
 	local PAD_X = 10
 	local PAD_Y = 4
@@ -1760,7 +1830,6 @@ function obj:showWindowMenu(windowId)
 	local mouse = hs.mouse.absolutePosition()
 	local screen = hs.screen.mainScreen():frame()
 
-	-- Clamp so menu stays on screen
 	local mx = math.min(mouse.x, screen.x + screen.w - MENU_W - 4)
 	local my = math.min(mouse.y, screen.y + screen.h - MENU_H - 4)
 
@@ -1768,7 +1837,6 @@ function obj:showWindowMenu(windowId)
 	canvas:level(hs.canvas.windowLevels.popUpMenu)
 	canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
 
-	-- Background
 	canvas:appendElements({
 		type = "rectangle",
 		frame = { x = 0, y = 0, w = MENU_W, h = MENU_H },
@@ -1778,7 +1846,6 @@ function obj:showWindowMenu(windowId)
 		roundedRectRadii = { xRadius = 5, yRadius = 5 },
 	})
 
-	-- Row highlight tracker (element index 2, hidden initially)
 	canvas:appendElements({
 		type = "rectangle",
 		frame = { x = 3, y = PAD_Y, w = MENU_W - 6, h = ROW_H },
@@ -1788,7 +1855,6 @@ function obj:showWindowMenu(windowId)
 	})
 	local HIGHLIGHT_IDX = 2
 
-	-- Row text elements (label + shortcut)
 	for i, item in ipairs(items) do
 		local rowY = PAD_Y + (i - 1) * ROW_H
 		canvas:appendElements({
@@ -1826,6 +1892,10 @@ function obj:showWindowMenu(windowId)
 		if self._menuKeyTap then
 			self._menuKeyTap:stop()
 			self._menuKeyTap = nil
+		end
+		if self._needsRebuild then
+			self._needsRebuild = nil
+			self:buildSidebar()
 		end
 	end
 
@@ -1888,6 +1958,46 @@ function obj:showWindowMenu(windowId)
 		return false
 	end)
 	self._menuKeyTap:start()
+end
+
+function obj:showGlobalMenu()
+	if self._menuCanvas then
+		self._menuCanvas:delete()
+		self._menuCanvas = nil
+	end
+	if self._menuEventTap then
+		self._menuEventTap:stop()
+		self._menuEventTap = nil
+	end
+	if self._menuKeyTap then
+		self._menuKeyTap:stop()
+		self._menuKeyTap = nil
+	end
+
+	local items = {
+		{
+			label = "Refresh Layout",
+			shortcut = "\xE2\x8C\x98\xE2\x87\xA7R",
+			action = function()
+				self:refreshLayout()
+			end,
+		},
+		{
+			label = "Show/Hide Axis",
+			shortcut = "\xE2\x8C\x98\xE2\x87\xA7B",
+			action = function()
+				self:toggleSidebar()
+			end,
+		},
+		{
+			label = "Swap Side",
+			shortcut = "\xE2\x8C\x98\xE2\x87\xA7S",
+			action = function()
+				self:toggleSide()
+			end,
+		},
+	}
+	self:_renderPopupMenu(items)
 end
 
 function obj:moveWindowById(windowId, direction)
@@ -2094,6 +2204,10 @@ function obj:handleWindowMoveOrResize()
 		if self._toggleLock then
 			return
 		end
+		if not self._sidebarVisible then
+			return
+		end
+
 		local wins = getITermWindows()
 		if #wins == 0 then
 			return
@@ -2136,14 +2250,29 @@ function obj:handleWindowMoveOrResize()
 
 		local cfg = self.config
 		local currentAnchor = self:getSidebarAnchor()
-		local expectedX = currentAnchor.x + cfg.sidebarWidth
-		local expectedY = currentAnchor.y
-		local expectedH = currentAnchor.h
+		local sf = newScreen:frame()
+
+		local expectedEdge, edgeFn
+		if self.config.sidebarSide ~= "left" then
+			expectedEdge = currentAnchor.x -- sidebar left edge
+			edgeFn = function(f)
+				return f.x + f.w
+			end -- window right edge
+		else
+			expectedEdge = currentAnchor.x + cfg.sidebarWidth -- sidebar right edge
+			edgeFn = function(f)
+				return f.x
+			end -- window left edge
+		end
 
 		local driftedWin = nil
 		for i = #wins, 1, -1 do
 			local f = wins[i]:frame()
-			if math.abs(f.x - expectedX) > 5 or math.abs(f.y - expectedY) > 5 or math.abs(f.h - expectedH) > 5 then
+			if
+				math.abs(edgeFn(f) - expectedEdge) > 5
+				or math.abs(f.y - currentAnchor.y) > 5
+				or math.abs(f.h - currentAnchor.h) > 5
+			then
 				driftedWin = wins[i]
 				break
 			end
@@ -2151,25 +2280,22 @@ function obj:handleWindowMoveOrResize()
 
 		if driftedWin then
 			local f = driftedWin:frame()
-			local sf = newScreen:frame()
 			local sidebarW = cfg.sidebarWidth
 
 			if f.w <= sidebarW then
 				return
 			end
 
-			local anchorX = f.x
-			local sidebarX = math.max(anchorX, sf.x)
-			local contentX = sidebarX + sidebarW
-			local maxW = (sf.x + sf.w) - contentX
-			if maxW <= 0 then
+			local l = self:layoutFrames(sf, { x = f.x, y = f.y, w = f.w, h = f.h })
+			local contentW = math.min(f.w - sidebarW, l.content.w)
+			if contentW <= 0 then
 				return
 			end
-			local contentW = math.min(f.w - sidebarW, maxW)
 
-			self._pendingSidebarFrame = { x = sidebarX, y = f.y, w = sidebarW, h = f.h }
+			self._pendingSidebarFrame = l.sidebar
 			self._currentScreen = newScreen
 
+			local contentX = math.max(l.content.x, math.min(f.x, l.content.x + l.content.w - contentW))
 			local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
 			for _, w in ipairs(wins) do
 				w:setFrame(newFrame)
@@ -2206,9 +2332,13 @@ function obj:bindHotkeys(mapping)
 	local moveBottomMods, moveBottomKey = table.unpack(map.moveToBottom or { { "cmd", "shift", "alt" }, "down" })
 	local focusUpMods, focusUpKey = table.unpack(map.focusUp or { { "alt", "cmd" }, "up" })
 	local focusDownMods, focusDownKey = table.unpack(map.focusDown or { { "alt", "cmd" }, "down" })
+	local swapSideMods, swapSideKey = table.unpack(map.swapSide or { { "cmd", "shift" }, "S" })
 
 	hs.hotkey.bind(toggleMods, toggleKey, function()
 		self:toggleSidebar()
+	end)
+	hs.hotkey.bind(swapSideMods, swapSideKey, function()
+		self:toggleSide()
 	end)
 
 	hs.hotkey.bind(newWinMods, newWinKey, function()
@@ -2294,84 +2424,97 @@ end
 -- Spoon API: start / stop
 -- ─────────────────────────────────────────────
 
-function obj:start()
-	-- Right-click: narrow eventtap, only acts when iTerm2 is already frontmost
-	if self._rightClickTap then
-		self._rightClickTap:stop()
+function obj:_setupSidebarClickTap()
+	if self._clickTap then
+		self._clickTap:stop()
 	end
-	self._rightClickTap = hs.eventtap.new({ hs.eventtap.event.types.rightMouseDown }, function(e)
-		if not self._sidebarVisible then
-			return false
-		end
-		if not isSidebarClickAllowed() then
-            return false
-        end
-		local mouse = e:location()
-		local sf = self.sidebarCanvas:frame()
-		if mouse.x >= sf.x and mouse.x <= sf.x + sf.w and mouse.y >= sf.y and mouse.y <= sf.y + sf.h then
-			self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, true)
-			return false
-		end
-		return false
-	end)
-	self._rightClickTap:start()
-
-	-- Left-click eventtap: intercept sidebar clicks before canvas mouseCallback
-	if self._leftClickTap then
-		self._leftClickTap:stop()
-	end
-	self._leftClickTap = hs.eventtap.new({ hs.eventtap.event.types.leftMouseDown }, function(e)
-		-- Cancel rename mode on any mouse click
+	self._clickTap = hs.eventtap.new({
+		hs.eventtap.event.types.leftMouseDown,
+		hs.eventtap.event.types.rightMouseDown,
+	}, function(e)
 		if self._renameMode then
 			self:cancelRenameMode()
 		end
-        if not self._sidebarVisible then
+		if not self._sidebarVisible then
 			return false
 		end
-        if not isSidebarClickAllowed() then
-            return false
-        end
 		local sf = self.sidebarCanvas and self.sidebarCanvas:frame()
 		if not sf then
 			return false
 		end
 		local mouse = e:location()
 		if rectContains(sf, mouse.x, mouse.y) then
-			local lx = mouse.x - sf.x
-			local ly = mouse.y - sf.y
-			for _, btn in ipairs(self._buttonFrames or {}) do
-				if lx >= btn.x and lx <= btn.x + btn.w and ly >= btn.y and ly <= btn.y + btn.h then
-					self.activeWindowId = btn.windowId
-					stopFlashing(btn.windowId)
-					if self._btnBgElements then
-						for wid, bgIdx in pairs(self._btnBgElements) do
-							local c = (wid == btn.windowId) and self.config.activeButtonColor or self.config.buttonColor
-							self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
-						end
-					end
-					local win = hs.window.get(btn.windowId)
-					if win then
-						pcall(function()
-							local app = hs.application.get("com.googlecode.iterm2")
-							if app then
-								app:activate()
-							end
-							win:raise()
-							win:focus()
-						end)
-					end
-					hs.timer.doAfter(0.05, function()
-						self:syncCanvasLevel()
-					end)
-					return false
-				end
-			end
-			-- In the sidebar area but not on a button: swallow the click
+			local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
+			self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, isRight)
 			return false
 		end
 		return false
 	end)
-	self._leftClickTap:start()
+	self._clickTap:start()
+end
+
+function obj:_rebuildSidebar()
+	if self.sidebarCanvas and self._sidebarVisible then
+		self._lastSidebarSnapshot = nil
+		self:buildSidebar()
+	end
+end
+
+function obj:_setupDragTap()
+	if self._dragWatchTap then
+		self._dragWatchTap:stop()
+	end
+	self._dragWatchTap = hs.eventtap.new({
+		hs.eventtap.event.types.leftMouseDragged,
+		hs.eventtap.event.types.leftMouseUp,
+	}, function(e)
+		local etype = e:getType()
+		if etype == hs.eventtap.event.types.leftMouseUp then
+			if self._dragActive then
+				self._dragActive = false
+				self._lastDragHoverId = nil
+				self:_rebuildSidebar()
+			end
+			return false
+		end
+
+		if not self._sidebarVisible or not self.sidebarCanvas then
+			return false
+		end
+
+		local sf = self.sidebarCanvas:frame()
+		local mouse = e:location()
+
+		if rectContains(sf, mouse.x, mouse.y) then
+			self._dragActive = true
+			local lx = mouse.x - sf.x
+			local ly = mouse.y - sf.y
+			local hoveredId
+			for _, btn in ipairs(self._buttonFrames or {}) do
+				if lx >= btn.x and lx <= btn.x + btn.w and ly >= btn.y and ly <= btn.y + btn.h then
+					hoveredId = btn.windowId
+					break
+				end
+			end
+
+			if hoveredId and hoveredId ~= self._lastDragHoverId then
+				self._lastDragHoverId = hoveredId
+				self:bringWindowToFront(hoveredId)
+				self:_rebuildSidebar()
+			end
+		elseif self._dragActive then
+			self._lastDragHoverId = nil
+			self:_rebuildSidebar()
+		end
+
+		return false
+	end)
+	self._dragWatchTap:start()
+end
+
+function obj:start()
+	self:_setupSidebarClickTap()
+	self:_setupDragTap()
 
 	if self._winWatcher then
 		self._winWatcher:stop()
@@ -2590,6 +2733,7 @@ function obj:start()
 				self.sidebarCanvas = nil
 			end
 			self._lastStructureSnapshot = nil
+			self._sidebarVisible = true
 			self:buildSidebar()
 			self:tileITermWindows()
 		end)
@@ -2610,6 +2754,7 @@ function obj:start()
 	end)
 	self._spaceWatcher:start()
 
+	self._sidebarVisible = not self.config.startHidden
 	self:buildSidebar()
 	self:tileITermWindows()
 
@@ -2652,13 +2797,13 @@ function obj:stop()
 		self._appWatcher:stop()
 		self._appWatcher = nil
 	end
-	if self._leftClickTap then
-		self._leftClickTap:stop()
-		self._leftClickTap = nil
+	if self._clickTap then
+		self._clickTap:stop()
+		self._clickTap = nil
 	end
-	if self._rightClickTap then
-		self._rightClickTap:stop()
-		self._rightClickTap = nil
+	if self._dragWatchTap then
+		self._dragWatchTap:stop()
+		self._dragWatchTap = nil
 	end
 	if self._winWatcher then
 		self._winWatcher:stop()
@@ -2743,8 +2888,7 @@ function obj:init()
 	self._resizeDebounceTimer = nil
 	self._buildDebounceTimer = nil
 	self._pendingSidebarFrame = nil
-	self._leftClickTap = nil
-	self._rightClickTap = nil
+	self._clickTap = nil
 	self._winWatcher = nil
 	self._screenWatcher = nil
 	self._spaceWatcher = nil
@@ -2797,6 +2941,9 @@ function obj:init()
 	self._renameTextIdx = nil
 	self._renameBlink = nil
 	self._cursorVisible = true
+	self._dragWatchTap = nil
+	self._dragActive = false
+	self._lastDragHoverId = nil
 	return self
 end
 

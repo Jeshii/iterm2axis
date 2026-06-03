@@ -1,13 +1,15 @@
 # iTerm2Axis
 
-A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floating sidebar to iTerm2, letting you switch between stacked windows the way tmux lets you switch panes — without leaving the keyboard or spawning a new process.
+A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floating sidebar (configurable left or right side) to iTerm2, letting you switch between stacked windows the way tmux lets you switch panes — without leaving the keyboard or spawning a new process.
 
 ## Features
 
-- Floating sidebar showing all open iTerm2 windows — labeled by hostname (remote), current directory (local), or custom rename
+- Floating sidebar (configurable left/right) showing all open iTerm2 windows — labeled by hostname (remote), current directory (local), or custom rename
 - Click any window button to bring it to the front
 - Keyboard navigation to cycle focus between windows
-- Right-click any window for a context menu: Rename, Reorder, Refresh, Show/Hide Axis, iTerm Settings Tip
+- Right-click any window for a context menu: Rename, Reorder, Refresh, Show/Hide Axis, Swap Side; right-click empty sidebar area for global menu
+- Drag a tab over a sidebar button to bring that window to front (green highlight) — merge tabs across windows
+- Configurable start hidden, swap sidebar side at runtime
 - Auto-refreshes on window open/close/title change and screen layout changes
 
 ## Installation
@@ -30,6 +32,7 @@ spoon.iTerm2Axis:bindHotkeys({
     moveToBottom = {{"cmd", "shift", "alt"}, "down"},
     focusUp      = {{"alt", "cmd"}, "up"},
     focusDown    = {{"alt", "cmd"}, "down"},
+    swapSide     = {{"cmd", "shift"}, "S"},
 })
 ```
 
@@ -66,6 +69,7 @@ All hotkeys have built-in defaults but **are only registered when you call `bind
 | ⌘⇧⌥↓ | `moveToBottom` | Move active window to bottom of sidebar |
 | ⌥⌘↑ | `focusUp` | Focus the previous window in the sidebar |
 | ⌥⌘↓ | `focusDown` | Focus the next window in the sidebar |
+| ⌘⇧S | `swapSide` | Swap sidebar to the opposite side |
 
 To override a combo, pass your preferred value in the `bindHotkeys` call:
 
@@ -86,19 +90,22 @@ spoon.iTerm2Axis.config.sidebarWidth = 200
 spoon.iTerm2Axis.config.activeButtonColor = {red=0.8, green=0.3, blue=0.1, alpha=1}
 ```
 
-The sidebar only intercepts clicks when iTerm2 is the focused application, so it never disrupts other apps.
+The sidebar uses eventtap-based click interception and drag detection, so buttons respond to clicks, focus, and drag-over even when other apps are frontmost.
 
 Available options (all optional — defaults are used for anything omitted):
 
 ```lua
 spoon.iTerm2Axis.config = {
-    sidebarWidth = 260,
+    sidebarWidth = 200,
+    sidebarSide = "left",             -- "left" or "right"
+    startHidden = false,              -- start with sidebar hidden
+    sidebarColor = {red=0.12, green=0.12, blue=0.14, alpha=0.95},
+    buttonColor = {red=0.2, green=0.2, blue=0.22, alpha=1},
+    activeButtonColor = {red=0.25, green=0.4, blue=0.6, alpha=1},
+    dragHighlightColor = {red=0.3, green=0.7, blue=0.4, alpha=0.9},
+    textColor = {red=0.9, green=0.9, blue=0.9, alpha=1},
     windowButtonHeight = 90,
     padding = 8,
-    sidebarColor = {red=0.14, green=0.14, blue=0.15, alpha=1},
-    buttonColor = {red=0.24, green=0.25, blue=0.28, alpha=1},
-    activeButtonColor = {red=0.35, green=0.55, blue=0.85, alpha=1},
-    textColor = {red=0.85, green=0.86, blue=0.88, alpha=1},
     font = ".AppleSystemUIFont",
     fontSize = 13,
     debug = false,

@@ -1,5 +1,15 @@
-## 2026-06-04
+## 2026-06-03
 
+- **Right-side sidebar support**: added `sidebarSide` config ("left" or "right"), `layoutFrames()` replaces `computeLayout()` for bidirectional layout math, new `toggleSide()` method and `⌘⇧S` hotkey to swap sides at runtime; `handleWindowMoveOrResize` drift detection and `toggleSidebar` hide restore both handle right-side positioning
+- **Start hidden mode**: added `startHidden` config — when `true`, sidebar starts invisible; `_sidebarVisible` initialized from config instead of always `true`
+- **Drag-over-sidebar tab merging**: new `_dragWatchTap` eventtap monitors `leftMouseDragged`/`leftMouseUp` — dragging a tab over a sidebar button brings the corresponding iTerm window to front and highlights the button with `dragHighlightColor` (green). Button color reverts when drag leaves the sidebar or ends
+- **Combined left/right click eventtap**: `_leftClickTap` + `_rightClickTap` merged into single `_clickTap` via `_setupSidebarClickTap()`; `handleSidebarClick` now activates iTerm2 app on any sidebar click, focuses the window on left-click, and calls `showGlobalMenu()` for right-clicks on empty sidebar area
+- **Global right-click menu**: `showGlobalMenu()` appears when right-clicking empty sidebar space — offers Refresh Layout, Show/Hide Axis, Swap Side; `_renderPopupMenu` extracted from `showWindowMenu` for reuse
+- **Removed `SETTINGS_KEY_NAMES` persistence**: `_saveCustomName` no longer writes to `hs.settings` under the old key; custom names are now only stored by path in `SETTINGS_KEY_NAMES_BY_PATH`
+- **`buildSidebar` defers during open menu**: sets `_needsRebuild` flag when menu is visible; rebuild fires after menu closes, preventing stale canvas state
+- **`_sidebarVisible` guards added**: to `_doBuildSidebar`, `tileITermWindows`, and `handleWindowMoveOrResize` for safety against stale geometry or rebuilds when sidebar is hidden
+- **`_sidebarVisible` set earlier in toggle**: moved before `refreshLayout()` call to prevent race with debounced `_doBuildSidebar`
+- **`_toggleLock` in `toggleSidebar` hide**: prevents drift detection during programmatic window moves when hiding the sidebar
 - Fixed left-click not registering when non-iTerm app is frontmost: inverted `orderedWindows()` guard to block clicks only when a non-iTerm2 window actually covers the click point, rather than requiring an iTerm2 window to be topmost (which fails when another app is frontmost)
 - Fixed toggle show/hide still looping: removed duplicate `tileITermWindows()` call from show branch of `toggleSidebar` — `refreshLayout()` already calls `buildSidebar` → `_doBuildSidebar` → `tileITermWindows`, so the second call was creating an extra wave of `windowMoved` events that fired after `_toggleLock` expired
 - Fixed `f:contains(clickPt)` nil error: replaced `hs.geometry.rect:contains()` call with a manual bounds check, since `w:frame()` can return a plain Lua table (truthy but lacking the `:contains()` method) for off-screen/minimized windows
@@ -9,9 +19,6 @@
 - Changed `syncCanvasLevel` non-iTerm fallback from `floating - 1` to `normal` to prevent sidebar from floating above other apps
 - Consolidated canvas level setting: removed duplicate `_appWatcher` level calls (`floating` on activate, `floating - 1` on deactivate) so `syncCanvasLevel` is the single source of truth, eliminating race conditions between the two systems
 - Replaced manual bounds check in `_leftClickTap` window-scanning loop with `rectContains` helper for consistency
-
-## 2026-06-03
-
 - Simplified `syncCanvasLevel`: always uses `normal` window level + `orderAbove(nil)` instead of toggling between `floating` and `normal`; other apps naturally layer above the canvas when frontmost, eliminating level-based race conditions
 - Replaced `hs.window.orderedWindows()` walk in `_leftClickTap` with `isSidebarClickAllowed()` helper (checks frontmost app is iTerm2 or Hammerspoon) for simpler, more reliable click gating
 - Changed eventtap handlers to return `false` instead of `true` — sidebar clicks are no longer swallowed at the OS level, fixing focus forwarding and click-through issues
