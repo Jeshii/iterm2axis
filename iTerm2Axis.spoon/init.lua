@@ -2063,17 +2063,19 @@ function obj:start()
             local mouse = e:location()
             if mouse.x >= sf.x and mouse.x <= sf.x + sf.w and
                mouse.y >= sf.y and mouse.y <= sf.y + sf.h then
-                 local clickingITerm = false
-                 local clickPt = hs.geometry.point(mouse.x, mouse.y)
-                 for _, w in ipairs(hs.window.orderedWindows()) do
-                     if w:frame():contains(clickPt) then
-                         local app = w:application()
-                         if app and app:bundleID() == "com.googlecode.iterm2" then
-                             clickingITerm = true
-                         end
-                         break
-                     end
-                 end
+                  local clickingITerm = false
+                  local clickPt = hs.geometry.point(mouse.x, mouse.y)
+                  for _, w in ipairs(hs.window.orderedWindows()) do
+                      local app = w:application()
+                      if app then  -- skip canvas/non-app windows
+                          if w:frame():contains(clickPt) then
+                              if app:bundleID() == "com.googlecode.iterm2" then
+                                  clickingITerm = true
+                              end
+                              break
+                          end
+                      end
+                  end
                  if not clickingITerm then return false end
                 local lx = mouse.x - sf.x
                 local ly = mouse.y - sf.y
