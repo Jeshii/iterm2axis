@@ -33,6 +33,7 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 - **Do NOT automatically copy `iTerm2Axis.spoon` to `~/.hammerspoon/Spoons/`.** The user will copy it manually after reviewing changes.
 - All edits go into the repo's `iTerm2Axis.spoon/init.lua`. The user handles deployment.
 - When debugging, ask the user to check Hammerspoon's Console (menu bar icon → Console) or run `/Applications/Hammerspoon.app/Contents/MacOS/Hammerspoon` from a terminal to see errors.
+- Run `stylua` on any lua files you edit
 - Do not push changes to the remote without asking first
 - Window label priority: custom rename → remote hostname (parts.host) → local PWD basename → "Window N" fallback
 - Update CHANGELOG.md after making any changes

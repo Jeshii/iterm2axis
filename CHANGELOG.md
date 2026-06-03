@@ -2,6 +2,13 @@
 
 - Fixed left-click not registering when non-iTerm app is frontmost: inverted `orderedWindows()` guard to block clicks only when a non-iTerm2 window actually covers the click point, rather than requiring an iTerm2 window to be topmost (which fails when another app is frontmost)
 - Fixed toggle show/hide still looping: removed duplicate `tileITermWindows()` call from show branch of `toggleSidebar` — `refreshLayout()` already calls `buildSidebar` → `_doBuildSidebar` → `tileITermWindows`, so the second call was creating an extra wave of `windowMoved` events that fired after `_toggleLock` expired
+- Fixed `f:contains(clickPt)` nil error: replaced `hs.geometry.rect:contains()` call with a manual bounds check, since `w:frame()` can return a plain Lua table (truthy but lacking the `:contains()` method) for off-screen/minimized windows
+- Applied `stylua` formatting pass across the entire file for consistent indentation
+- Fixed sidebar left clicks being swallowed: corrected `rectContains(f, ...)` → `rectContains(sf, ...)` variable name bug in `_leftClickTap` — `f` was nil at that scope, causing the sidebar click handler to always skip
+- Cleaned up `syncCanvasLevel`: removed dead code (window-level scanning loop, unused `targetWin`/`best`/`bestLvl` variables) that was calculating the topmost iTerm window level but never using the result
+- Changed `syncCanvasLevel` non-iTerm fallback from `floating - 1` to `normal` to prevent sidebar from floating above other apps
+- Consolidated canvas level setting: removed duplicate `_appWatcher` level calls (`floating` on activate, `floating - 1` on deactivate) so `syncCanvasLevel` is the single source of truth, eliminating race conditions between the two systems
+- Replaced manual bounds check in `_leftClickTap` window-scanning loop with `rectContains` helper for consistency
 
 ## 2026-06-03
 
