@@ -1,3 +1,8 @@
+## 2026-06-04
+
+- Fixed left-click not registering when non-iTerm app is frontmost: inverted `orderedWindows()` guard to block clicks only when a non-iTerm2 window actually covers the click point, rather than requiring an iTerm2 window to be topmost (which fails when another app is frontmost)
+- Fixed toggle show/hide still looping: removed duplicate `tileITermWindows()` call from show branch of `toggleSidebar` — `refreshLayout()` already calls `buildSidebar` → `_doBuildSidebar` → `tileITermWindows`, so the second call was creating an extra wave of `windowMoved` events that fired after `_toggleLock` expired
+
 ## 2026-06-03
 
 - Fixed toggle sidebar loop: added `_toggleLock` flag that suppresses drift detection in `handleWindowMoveOrResize` during programmatic window moves from `toggleSidebar`; also added `_sidebarEnabled` guard to `tileITermWindows` to prevent stale geometry tiling when the sidebar is hidden

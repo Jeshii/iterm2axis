@@ -1301,7 +1301,6 @@ function obj:toggleSidebar()
         self._lastStructureSnapshot = nil
         self._lastSidebarSnapshot = nil
         self:refreshLayout()
-        self:tileITermWindows()
         self:syncCanvasLevel()
         hs.timer.doAfter(0.5, function() self._toggleLock = false end)
     end
@@ -2063,20 +2062,18 @@ function obj:start()
             local mouse = e:location()
             if mouse.x >= sf.x and mouse.x <= sf.x + sf.w and
                mouse.y >= sf.y and mouse.y <= sf.y + sf.h then
-                  local clickingITerm = false
+                  local blockClick = false
                   local clickPt = hs.geometry.point(mouse.x, mouse.y)
                   for _, w in ipairs(hs.window.orderedWindows()) do
                       local app = w:application()
-                      if app then  -- skip canvas/non-app windows
-                          if w:frame():contains(clickPt) then
-                              if app:bundleID() == "com.googlecode.iterm2" then
-                                  clickingITerm = true
-                              end
-                              break
+                      if app and w:frame():contains(clickPt) then
+                          if app:bundleID() ~= "com.googlecode.iterm2" then
+                              blockClick = true
                           end
+                          break
                       end
                   end
-                 if not clickingITerm then return false end
+                 if blockClick then return false end
                 local lx = mouse.x - sf.x
                 local ly = mouse.y - sf.y
                 for _, btn in ipairs(self._buttonFrames or {}) do
