@@ -1363,7 +1363,11 @@ function obj:_doBuildSidebar()
 	if needsFullRebuild and self._sidebarEnabled then
 		self.sidebarCanvas:show()
 		self._sidebarVisible = true
+		if not self._skipTileOnThisBuild then
+			self:tileITermWindows(sb)
+		end
 	end
+	self._skipTileOnThisBuild = false
 
 	if not ok then
 		hs.printf("buildSidebar crashed: %s", tostring(err))
@@ -1374,14 +1378,15 @@ end
 -- Window Management
 -- ─────────────────────────────────────────────
 
-function obj:tileITermWindows()
+function obj:tileITermWindows(sb)
 	if not self._sidebarEnabled then
 		return
 	end
 	local screenFrame = self:getScreen():frame()
 	local newFrame
 	if self._sidebarVisible then
-		newFrame = self:layoutFrames(screenFrame, self:getSidebarAnchor()).content
+		local anchor = sb or self:getSidebarAnchor()
+		newFrame = self:layoutFrames(screenFrame, anchor).content
 	else
 		newFrame = screenFrame
 	end
@@ -1403,6 +1408,7 @@ function obj:refreshLayout()
 		self._currentScreen = anchorWin:screen()
 		self._lastStructureSnapshot = nil
 	end
+	self._skipTileOnThisBuild = false
 	self:buildSidebar()
 	self:syncCanvasLevel()
 end
@@ -1412,11 +1418,7 @@ function obj:toggleSidebar()
 		local sbf = self.sidebarCanvas:frame()
 		self.sidebarCanvas:hide()
 		self._sidebarVisible = false
-		for _, win in ipairs(getITermWindows()) do
-			local f = win:frame()
-			local restoreX = (self.config.sidebarSide ~= "left") and f.x or sbf.x
-			win:setFrame({ x = restoreX, y = f.y, w = f.w + self.config.sidebarWidth, h = f.h })
-		end
+		self:tileITermWindows()
 		self._toggleLock = true
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
@@ -2298,6 +2300,7 @@ function obj:handleWindowMoveOrResize()
 				w:setFrame(newFrame)
 			end
 
+			self._skipTileOnThisBuild = true
 			self._lastStructureSnapshot = nil
 			self:buildSidebar()
 		end
@@ -2511,16 +2514,23 @@ end
 -- Watcher Setup (extracted from start())
 -- ─────────────────────────────────────────────
 
+function obj:_rebuildAfterSettle(tileWhenHidden)
+	hs.timer.doAfter(self.config.settleDelay, function()
+		self._lastStructureSnapshot = nil
+		self:buildSidebar()
+		if tileWhenHidden and not self._sidebarVisible then
+			self:tileITermWindows()
+		end
+	end)
+end
+
 function obj:_setupWindowWatcher()
 	self._winWatcher:subscribe("windowCreated", function(win)
 		if win then
 			self:watchWindow(win)
 		end
 		_iTermWindowsCache = nil
-		hs.timer.doAfter(self.config.settleDelay, function()
-			self._lastStructureSnapshot = nil
-			self:buildSidebar()
-		end)
+		self:_rebuildAfterSettle(true)
 	end)
 	self._winWatcher:subscribe("windowDestroyed", function(win)
 		local id = win and win:id()
@@ -2543,27 +2553,18 @@ function obj:_setupWindowWatcher()
 			stopFlashing(id)
 		end
 		_iTermWindowsCache = nil
-		hs.timer.doAfter(self.config.settleDelay, function()
-			self._lastStructureSnapshot = nil
-			self:buildSidebar()
-		end)
+		self:_rebuildAfterSettle(true)
 	end)
 	self._winWatcher:subscribe("windowMinimized", function()
 		_iTermWindowsCache = nil
-		hs.timer.doAfter(self.config.settleDelay, function()
-			self._lastStructureSnapshot = nil
-			self:buildSidebar()
-		end)
+		self:_rebuildAfterSettle()
 	end)
 	self._winWatcher:subscribe("windowUnminimized", function(win)
 		if win then
 			self:watchWindow(win)
 		end
 		_iTermWindowsCache = nil
-		hs.timer.doAfter(self.config.settleDelay, function()
-			self._lastStructureSnapshot = nil
-			self:buildSidebar()
-		end)
+		self:_rebuildAfterSettle(true)
 	end)
 	self._winWatcher:subscribe("windowTitleChanged", function(win)
 		local isCCStateChange
