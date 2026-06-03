@@ -1375,19 +1375,16 @@ end
 -- ─────────────────────────────────────────────
 
 function obj:tileITermWindows()
-	if not self._sidebarVisible then
-		return
-	end
-	if not self.sidebarCanvas then
-		return
-	end
 	if not self._sidebarEnabled then
 		return
 	end
-	local sf = self.sidebarCanvas:frame()
-	local screen = self:getScreen()
-	local screenFrame = screen:frame()
-	local newFrame = self:layoutFrames(screenFrame, sf).content
+	local screenFrame = self:getScreen():frame()
+	local newFrame
+	if self._sidebarVisible then
+		newFrame = self:layoutFrames(screenFrame, self:getSidebarAnchor()).content
+	else
+		newFrame = screenFrame
+	end
 	for _, win in ipairs(getITermWindows()) do
 		win:setFrame(newFrame)
 	end
@@ -1407,7 +1404,6 @@ function obj:refreshLayout()
 		self._lastStructureSnapshot = nil
 	end
 	self:buildSidebar()
-	self:tileITermWindows()
 	self:syncCanvasLevel()
 end
 
@@ -1441,7 +1437,6 @@ function obj:toggleSidebar()
 		self._lastStructureSnapshot = nil
 		self._lastSidebarSnapshot = nil
 		self:refreshLayout()
-		self:tileITermWindows()
 		self:syncCanvasLevel()
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
@@ -2247,7 +2242,6 @@ function obj:handleWindowMoveOrResize()
 			end
 			self._lastStructureSnapshot = nil
 			self:buildSidebar()
-			self:tileITermWindows()
 			return
 		end
 
@@ -2353,7 +2347,6 @@ function obj:bindHotkeys(mapping)
 				hs.timer.doAfter(0.5, function()
 					self._lastStructureSnapshot = nil
 					self:buildSidebar()
-					self:tileITermWindows()
 				end)
 			end)
 		else
@@ -2361,7 +2354,6 @@ function obj:bindHotkeys(mapping)
 			hs.timer.doAfter(1.0, function()
 				self._lastStructureSnapshot = nil
 				self:buildSidebar()
-				self:tileITermWindows()
 			end)
 		end
 	end)
@@ -2528,7 +2520,6 @@ function obj:_setupWindowWatcher()
 		hs.timer.doAfter(self.config.settleDelay, function()
 			self._lastStructureSnapshot = nil
 			self:buildSidebar()
-			self:tileITermWindows()
 		end)
 	end)
 	self._winWatcher:subscribe("windowDestroyed", function(win)
@@ -2572,7 +2563,6 @@ function obj:_setupWindowWatcher()
 		hs.timer.doAfter(self.config.settleDelay, function()
 			self._lastStructureSnapshot = nil
 			self:buildSidebar()
-			self:tileITermWindows()
 		end)
 	end)
 	self._winWatcher:subscribe("windowTitleChanged", function(win)
@@ -2741,7 +2731,6 @@ function obj:_setupScreenWatcher()
 			self._lastStructureSnapshot = nil
 			self._sidebarVisible = true
 			self:buildSidebar()
-			self:tileITermWindows()
 		end)
 	end)
 	self._screenWatcher:start()
@@ -2756,7 +2745,6 @@ function obj:_setupSpaceWatcher()
 			self:syncCanvasLevel()
 			if self.sidebarCanvas and self._sidebarEnabled then
 				self:buildSidebar()
-				self:tileITermWindows()
 			end
 		end)
 	end)
@@ -2774,7 +2762,6 @@ function obj:start()
 
 	self._sidebarVisible = not self.config.startHidden
 	self:buildSidebar()
-	self:tileITermWindows()
 
 	hs.task
 		.new("/usr/bin/which", function(exitCode, stdout, _)

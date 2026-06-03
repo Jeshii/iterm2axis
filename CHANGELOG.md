@@ -1,5 +1,9 @@
 ## 2026-06-03
 
+- **De-monolith `_doBuildSidebar()`**: extracted 5 pure-block-move helpers (`_closeMenus`, `_orderedWindows`, `_gatherWindowData`, `_renderFullSidebar`, `_renderInPlace`). `_doBuildSidebar()` shrunk from ~477 lines to ~58. No behavior change.
+- **Stripped redundant `tileITermWindows()` calls**: removed all 10 external `self:tileITermWindows()` calls that were unnecessary duplicates of the tiling triggered by `buildSidebar()` → `_doBuildSidebar()`. Tiling now fires only via the 50ms debounced `_doBuildSidebar` rather than also from each caller.
+- **Reverted tile-timing fix**: the Phase 2 attempt to move `tileITermWindows()` inside `_doBuildSidebar()` caused a cycle (`setFrame` → `windowMoved` → watcher → `handleWindowMoveOrResize` → `buildSidebar` → `_doBuildSidebar` → `setFrame` → ...) and snapped windows to tiled position on drift-triggered rebuilds. The stale-canvas-frame race condition will be addressed separately.
+
 - **Refactored `start()` into extracted methods**: pulled 5 watcher setup blocks into named methods (`_setupWindowWatcher`, `_restartWindowWatcher`, `_setupAppWatcher`, `_restorePersistedState`, `_setupScreenWatcher`, `_setupSpaceWatcher`) — `start()` reduced from ~260 lines to ~15, each extracted method has a clear single responsibility
 - **New `settleDelay` config option** (default `0.3`): replaces 8 previously hardcoded delays across all watcher subscribers (windowCreated, windowDestroyed, windowMinimized, windowUnminimized, windowTitleChanged, handleWindowMoveOrResize, screenWatcher, spaceWatcher) with a single tunable setting
 
