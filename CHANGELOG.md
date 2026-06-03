@@ -12,6 +12,13 @@
 
 ## 2026-06-03
 
+- Simplified `syncCanvasLevel`: always uses `normal` window level + `orderAbove(nil)` instead of toggling between `floating` and `normal`; other apps naturally layer above the canvas when frontmost, eliminating level-based race conditions
+- Replaced `hs.window.orderedWindows()` walk in `_leftClickTap` with `isSidebarClickAllowed()` helper (checks frontmost app is iTerm2 or Hammerspoon) for simpler, more reliable click gating
+- Changed eventtap handlers to return `false` instead of `true` — sidebar clicks are no longer swallowed at the OS level, fixing focus forwarding and click-through issues
+- Replaced `canvasMouseEvents(false, false, false, false)` with `clickActivating(false)` + noop `mouseCallback` in `_doBuildSidebar` to prevent canvas from intercepting clicks while still allowing eventtaps to work
+- Removed `debugTitles()` debugging utility no longer needed in production
+- Added `.vscode/*` to `.gitignore`
+
 - Fixed toggle sidebar loop: added `_toggleLock` flag that suppresses drift detection in `handleWindowMoveOrResize` during programmatic window moves from `toggleSidebar`; also added `_sidebarEnabled` guard to `tileITermWindows` to prevent stale geometry tiling when the sidebar is hidden
 - Fixed `_leftClickTap`: restored `hs.window.orderedWords()` walk to determine the topmost window at the click coordinate — the `frontmostApplication()` shortcut dropped all sidebar clicks when any other app had focus, even if iTerm2 windows covered the sidebar area
 - Fixed `_appWatcher` deactivation level: changed from `windowLevels.normal` to `windowLevels.floating - 1` for consistency with `syncCanvasLevel` (normal level gets buried under other app windows on recent macOS)

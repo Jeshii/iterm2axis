@@ -54,54 +54,6 @@ obj.config = {
 -- Helpers
 -- ─────────────────────────────────────────────
 
-function obj:debugTitles()
-	local wins = getITermWindows()
-	hs.printf("=== iTerm2Axis Debug: %d windows ===", #wins)
-	for i, win in ipairs(wins) do
-		local title = win:title() or ""
-		local parts = parseTitleComponents(title)
-		hs.printf("Window %d: title=%q", i, title)
-		hs.printf(
-			"  host=%s fullPath=%s basename=%s",
-			tostring(parts.host),
-			tostring(parts.fullPath),
-			tostring(parts.basename)
-		)
-		-- Check Claude Code dir
-		if parts.fullPath then
-			local ccDir = claudeProjectDir(parts.fullPath)
-			local files = {}
-			local ok, iter, dirObj = pcall(hs.fs.dir, ccDir)
-			if ok then
-				for _ = 1, 3 do
-					local f = iter(dirObj)
-					if not f then
-						break
-					end
-					table.insert(files, f)
-				end
-				iter(dirObj)
-			end
-			local display = #files > 0 and table.concat(files, ", ") or "(empty)"
-			hs.printf("  claudeDir=%s => %s", ccDir, display)
-		end
-		-- Check opencode match
-		if obj._opencodeData then
-			local matched = false
-			for dir, _ in pairs(obj._opencodeData) do
-				if parts.fullPath == dir then
-					matched = true
-				end
-			end
-			hs.printf("  opencode match: %s", tostring(matched))
-		end
-	end
-	hs.printf("=== opencode dirs ===")
-	for dir, data in pairs(obj._opencodeData or {}) do
-		hs.printf("  %s => model=%s", dir, tostring(data.modelID))
-	end
-end
-
 local function isITerm(win)
 	if not win then
 		return false
@@ -1075,7 +1027,9 @@ function obj:_doBuildSidebar()
 			self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
 			self.sidebarCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
 			self.sidebarCanvas:alpha(1)
-			self.sidebarCanvas:canvasMouseEvents(false, false, false, false)
+			self.sidebarCanvas:clickActivating(false)
+            local function noop() end
+            self.sidebarCanvas:mouseCallback(noop)
 			self._sidebarVisible = true
 			self._lastStructureSnapshot = structureSnap
 		elseif needsAnyWindowRebuild then
@@ -1506,17 +1460,28 @@ function obj:syncCanvasLevel()
 		return
 	end
 
+	self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
+	-- ^ resets ordering to bottom of normal level
+
 	local frontApp = hs.application.frontmostApplication()
 	if frontApp and frontApp:bundleID() == "com.googlecode.iterm2" then
-		self.sidebarCanvas:level(hs.canvas.windowLevels.floating)
-	else
-		self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
+		self.sidebarCanvas:orderAbove(nil)
+		-- ^ brings canvas to front of normal level, above iTerm windows
 	end
+	-- when iTerm is not frontmost, canvas stays at bottom of normal level
+	-- other apps naturally go above it
 end
 
 -- ─────────────────────────────────────────────
 -- Mouse Handling
 -- ─────────────────────────────────────────────
+
+local function isSidebarClickAllowed()
+    local front = hs.application.frontmostApplication()
+    if not front then return false end
+    local bid = front:bundleID()
+    return bid == "com.googlecode.iterm2" or bid == "org.hammerspoon.Hammerspoon"
+end
 
 function obj:handleSidebarClick(x, y, rightClick)
 	if not self._buttonFrames then
@@ -2338,15 +2303,14 @@ function obj:start()
 		if not self._sidebarVisible then
 			return false
 		end
-		local front = hs.application.frontmostApplication()
-		if not front or front:bundleID() ~= "com.googlecode.iterm2" then
-			return false
-		end
+		if not isSidebarClickAllowed() then
+            return false
+        end
 		local mouse = e:location()
 		local sf = self.sidebarCanvas:frame()
 		if mouse.x >= sf.x and mouse.x <= sf.x + sf.w and mouse.y >= sf.y and mouse.y <= sf.y + sf.h then
 			self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, true)
-			return true
+			return false
 		end
 		return false
 	end)
@@ -2361,31 +2325,18 @@ function obj:start()
 		if self._renameMode then
 			self:cancelRenameMode()
 		end
-		if not self._sidebarVisible then
+        if not self._sidebarVisible then
 			return false
 		end
+        if not isSidebarClickAllowed() then
+            return false
+        end
 		local sf = self.sidebarCanvas and self.sidebarCanvas:frame()
 		if not sf then
 			return false
 		end
 		local mouse = e:location()
 		if rectContains(sf, mouse.x, mouse.y) then
-			local blockClick = false
-			for _, w in ipairs(hs.window.orderedWindows()) do
-				local app = w:application()
-				if app then
-					local f = w:frame()
-					if rectContains(f, mouse.x, mouse.y) then
-						if app:bundleID() ~= "com.googlecode.iterm2" then
-							blockClick = true
-						end
-						break
-					end
-				end
-			end
-			if blockClick then
-				return false
-			end
 			local lx = mouse.x - sf.x
 			local ly = mouse.y - sf.y
 			for _, btn in ipairs(self._buttonFrames or {}) do
@@ -2412,11 +2363,11 @@ function obj:start()
 					hs.timer.doAfter(0.05, function()
 						self:syncCanvasLevel()
 					end)
-					return true
+					return false
 				end
 			end
 			-- In the sidebar area but not on a button: swallow the click
-			return true
+			return false
 		end
 		return false
 	end)
@@ -2545,6 +2496,12 @@ function obj:start()
 				if self._renameMode then
 					self:cancelRenameMode()
 				end
+				self:syncCanvasLevel() -- single source of truth
+			end
+		elseif event == hs.application.watcher.activated then
+			local bid = appObj and appObj:bundleID()
+			if bid == "com.googlecode.iterm2" and self._sidebarVisible then
+				self:syncCanvasLevel() -- single source of truth
 			end
 		end
 	end)

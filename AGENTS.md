@@ -38,3 +38,4 @@ A Hammerspoon window manager that provides a left-side sidebar for managing stac
 - Window label priority: custom rename → remote hostname (parts.host) → local PWD basename → "Window N" fallback
 - Update CHANGELOG.md after making any changes
 - Inform the user if AGENTS.md or README.md need updates after making any changes
+- When the user asks about releasing, remind them to update the version number at the top of `iTerm2Axis.spoon/init.lua`
