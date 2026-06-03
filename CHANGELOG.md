@@ -1,5 +1,8 @@
 ## 2026-06-03
 
+- **Refactored `start()` into extracted methods**: pulled 5 watcher setup blocks into named methods (`_setupWindowWatcher`, `_restartWindowWatcher`, `_setupAppWatcher`, `_restorePersistedState`, `_setupScreenWatcher`, `_setupSpaceWatcher`) — `start()` reduced from ~260 lines to ~15, each extracted method has a clear single responsibility
+- **New `settleDelay` config option** (default `0.3`): replaces 8 previously hardcoded delays across all watcher subscribers (windowCreated, windowDestroyed, windowMinimized, windowUnminimized, windowTitleChanged, handleWindowMoveOrResize, screenWatcher, spaceWatcher) with a single tunable setting
+
 - **Right-side sidebar support**: added `sidebarSide` config ("left" or "right"), `layoutFrames()` replaces `computeLayout()` for bidirectional layout math, new `toggleSide()` method and `⌘⇧S` hotkey to swap sides at runtime; `handleWindowMoveOrResize` drift detection and `toggleSidebar` hide restore both handle right-side positioning
 - **Start hidden mode**: added `startHidden` config — when `true`, sidebar starts invisible; `_sidebarVisible` initialized from config instead of always `true`
 - **Drag-over-sidebar tab merging**: new `_dragWatchTap` eventtap monitors `leftMouseDragged`/`leftMouseUp` — dragging a tab over a sidebar button brings the corresponding iTerm window to front and highlights the button with `dragHighlightColor` (green). Button color reverts when drag leaves the sidebar or ends

@@ -32,6 +32,8 @@ obj.config = {
 	windowButtonHeight = 90, -- tall enough for 5 lines (opencode + claudecode)
 	padding = 8,
 
+	settleDelay = 0.3,
+
 	opencode = {
 		enabled = true,
 		port = 4096,
@@ -2200,7 +2202,7 @@ function obj:handleWindowMoveOrResize()
 	if self._resizeDebounceTimer then
 		self._resizeDebounceTimer:stop()
 	end
-	self._resizeDebounceTimer = hs.timer.doAfter(0.3, function()
+	self._resizeDebounceTimer = hs.timer.doAfter(self.config.settleDelay, function()
 		if self._toggleLock then
 			return
 		end
@@ -2512,20 +2514,17 @@ function obj:_setupDragTap()
 	self._dragWatchTap:start()
 end
 
-function obj:start()
-	self:_setupSidebarClickTap()
-	self:_setupDragTap()
+-- ─────────────────────────────────────────────
+-- Watcher Setup (extracted from start())
+-- ─────────────────────────────────────────────
 
-	if self._winWatcher then
-		self._winWatcher:stop()
-	end
-	self._winWatcher = hs.window.filter.new("iTerm2")
+function obj:_setupWindowWatcher()
 	self._winWatcher:subscribe("windowCreated", function(win)
 		if win then
 			self:watchWindow(win)
 		end
 		_iTermWindowsCache = nil
-		hs.timer.doAfter(0.3, function()
+		hs.timer.doAfter(self.config.settleDelay, function()
 			self._lastStructureSnapshot = nil
 			self:buildSidebar()
 			self:tileITermWindows()
@@ -2552,14 +2551,14 @@ function obj:start()
 			stopFlashing(id)
 		end
 		_iTermWindowsCache = nil
-		hs.timer.doAfter(0.3, function()
+		hs.timer.doAfter(self.config.settleDelay, function()
 			self._lastStructureSnapshot = nil
 			self:buildSidebar()
 		end)
 	end)
 	self._winWatcher:subscribe("windowMinimized", function()
 		_iTermWindowsCache = nil
-		hs.timer.doAfter(0.3, function()
+		hs.timer.doAfter(self.config.settleDelay, function()
 			self._lastStructureSnapshot = nil
 			self:buildSidebar()
 		end)
@@ -2569,7 +2568,7 @@ function obj:start()
 			self:watchWindow(win)
 		end
 		_iTermWindowsCache = nil
-		hs.timer.doAfter(0.3, function()
+		hs.timer.doAfter(self.config.settleDelay, function()
 			self._lastStructureSnapshot = nil
 			self:buildSidebar()
 			self:tileITermWindows()
@@ -2603,7 +2602,7 @@ function obj:start()
 			end
 		end
 		if not isCCStateChange or isBellStateChange then
-			hs.timer.doAfter(0.1, function()
+			hs.timer.doAfter(self.config.settleDelay, function()
 				self:buildSidebar()
 			end)
 		end
@@ -2627,8 +2626,17 @@ function obj:start()
 			end)
 		end
 	end)
+end
 
-	-- Application focus watcher: cancel rename mode when iTerm2 loses focus
+function obj:_restartWindowWatcher()
+	if self._winWatcher then
+		self._winWatcher:stop()
+	end
+	self._winWatcher = hs.window.filter.new("iTerm2")
+	self:_setupWindowWatcher()
+end
+
+function obj:_setupAppWatcher()
 	if self._appWatcher then
 		self._appWatcher:stop()
 	end
@@ -2639,19 +2647,19 @@ function obj:start()
 				if self._renameMode then
 					self:cancelRenameMode()
 				end
-				self:syncCanvasLevel() -- single source of truth
+				self:syncCanvasLevel()
 			end
 		elseif event == hs.application.watcher.activated then
 			local bid = appObj and appObj:bundleID()
 			if bid == "com.googlecode.iterm2" and self._sidebarVisible then
-				self:syncCanvasLevel() -- single source of truth
+				self:syncCanvasLevel()
 			end
 		end
 	end)
 	self._appWatcher:start()
+end
 
-	-- Load path-keyed names BEFORE triggering async WD fetches, so the
-	-- callback in getWindowWorkingDir finds _customNamesByPath populated.
+function obj:_restorePersistedState()
 	local savedNamesByPath = hs.settings.get(SETTINGS_KEY_NAMES_BY_PATH)
 	if savedNamesByPath then
 		self._customNamesByPath = savedNamesByPath
@@ -2659,12 +2667,9 @@ function obj:start()
 
 	for _, win in ipairs(getITermWindows()) do
 		self:watchWindow(win)
-		-- bootstrap WD fetch on cold start so git/cc data
-		-- is available as soon as the async AppleScript returns.
 		getWindowWorkingDir(win)
 	end
 
-	-- Restore persisted order
 	local savedOrder = hs.settings.get(SETTINGS_KEY_ORDER)
 
 	if savedOrder then
@@ -2683,7 +2688,6 @@ function obj:start()
 		self._orderedWindowIds = filtered
 	end
 
-	-- Apply path-keyed custom names for any window whose WD resolved synchronously
 	if savedNamesByPath then
 		local liveWins = getITermWindows()
 		for _, w in ipairs(liveWins) do
@@ -2695,7 +2699,6 @@ function obj:start()
 		end
 	end
 
-	-- Deferred re-apply of path-keyed names once async WD fetches have settled
 	local function reapplyPathNames()
 		if not savedNamesByPath then
 			return
@@ -2717,12 +2720,14 @@ function obj:start()
 	end
 	hs.timer.doAfter(10, reapplyPathNames)
 	hs.timer.doAfter(30, reapplyPathNames)
+end
 
+function obj:_setupScreenWatcher()
 	if self._screenWatcher then
 		self._screenWatcher:stop()
 	end
 	self._screenWatcher = hs.screen.watcher.new(function()
-		hs.timer.doAfter(0.3, function()
+		hs.timer.doAfter(self.config.settleDelay, function()
 			if self._renameMode then
 				self:cancelRenameMode()
 			end
@@ -2739,12 +2744,14 @@ function obj:start()
 		end)
 	end)
 	self._screenWatcher:start()
+end
 
+function obj:_setupSpaceWatcher()
 	if self._spaceWatcher then
 		self._spaceWatcher:stop()
 	end
 	self._spaceWatcher = hs.spaces.watcher.new(function()
-		hs.timer.doAfter(0.15, function()
+		hs.timer.doAfter(self.config.settleDelay, function()
 			self:syncCanvasLevel()
 			if self.sidebarCanvas and self._sidebarEnabled then
 				self:buildSidebar()
@@ -2753,6 +2760,16 @@ function obj:start()
 		end)
 	end)
 	self._spaceWatcher:start()
+end
+
+function obj:start()
+	self:_setupSidebarClickTap()
+	self:_setupDragTap()
+	self:_restartWindowWatcher()
+	self:_setupAppWatcher()
+	self:_restorePersistedState()
+	self:_setupScreenWatcher()
+	self:_setupSpaceWatcher()
 
 	self._sidebarVisible = not self.config.startHidden
 	self:buildSidebar()
