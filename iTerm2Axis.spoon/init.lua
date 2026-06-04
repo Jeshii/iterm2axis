@@ -858,10 +858,6 @@ local function buildTextRows(wd)
 	return rows
 end
 
-local function buttonStructureKey(textRows)
-	return tostring(#textRows)
-end
-
 function obj:buildSidebar()
 	-- Phase 3 fix #4: debounce rapid back-to-back calls (e.g. multiple async
 	-- callbacks firing in the same event loop tick).
@@ -924,8 +920,6 @@ end
 
 function obj:_gatherWindowData(orderedWins)
 	local winData = {}
-	local needsAnyWindowRebuild = false
-	local maxNumRows = 1
 	for i, win in ipairs(orderedWins) do
 		local winId = win:id()
 		local isActive = (winId == self.activeWindowId)
@@ -985,21 +979,6 @@ function obj:_gatherWindowData(orderedWins)
 				end
 			end
 		end
-		local textRows = buildTextRows({
-			label = label,
-			basename = basename,
-			branch = branch,
-			wsName = wsName,
-			prFromTitle = prFromTitle,
-			ocData = ocData,
-			claudeAgent = claudeAgent,
-		})
-		local bKey = buttonStructureKey(textRows)
-
-		if self._btnStructureKeys[winId] ~= bKey then
-			needsAnyWindowRebuild = true
-		end
-
 		winData[i] = {
 			win = win,
 			winId = winId,
@@ -1011,14 +990,18 @@ function obj:_gatherWindowData(orderedWins)
 			prFromTitle = prFromTitle,
 			ocData = ocData,
 			claudeAgent = claudeAgent,
-			textRows = textRows,
-			bKey = bKey,
+			textRows = buildTextRows({
+				label = label,
+				basename = basename,
+				branch = branch,
+				wsName = wsName,
+				prFromTitle = prFromTitle,
+				ocData = ocData,
+				claudeAgent = claudeAgent,
+			}),
 		}
-		if #textRows > maxNumRows then
-			maxNumRows = #textRows
-		end
 	end
-	return winData, needsAnyWindowRebuild, maxNumRows
+	return winData
 end
 
 local PAD_TOP = 5
@@ -1086,9 +1069,8 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, btnH)
 			strokeWidth = 0,
 			roundedRectRadii = { xRadius = 4, yRadius = 4 },
 		})
-		local map = { bg = elemIdx }
+		local bgElemIdx = elemIdx
 		elemIdx = elemIdx + 1
-		map.rows = {}
 
 		for ri, row in ipairs(rows) do
 			local a = areas[ri]
@@ -1100,17 +1082,10 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, btnH)
 				textSize = row.fs,
 				textAlignment = "left",
 			})
-			map.rows[ri] = elemIdx
 			elemIdx = elemIdx + 1
 		end
 
-		self._elementMap[winId] = map
-		self._btnStructureKeys[winId] = wd.bKey
-		self._btnBgElements[winId] = map.bg
-
-		if self.config.debug then
-			hs.printf("elementMap[%d]: bg=%s rows=%d", winId, tostring(map.bg), #rows)
-		end
+		self._btnBgElements[winId] = bgElemIdx
 
 		self._buttonFrames[i] = {
 			x = cfg.padding,
@@ -1155,36 +1130,6 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, btnH)
 	self._pendingSidebarFrame = nil
 end
 
-function obj:_renderInPlace(winData, sb, btnH)
-	self._buttonFrames = {}
-	local y = 6
-	for i, wd in ipairs(winData) do
-		local winId = wd.winId
-		local map = self._elementMap[winId]
-		if map then
-			self.sidebarCanvas:elementAttribute(map.bg, "fillColor", color(wd.btnColor))
-			for ri, row in ipairs(wd.textRows) do
-				local elemIdx = map.rows[ri]
-				if elemIdx then
-					self.sidebarCanvas:elementAttribute(elemIdx, "text", row.text)
-				end
-			end
-		end
-
-		self._btnStructureKeys[winId] = wd.bKey
-
-		self._buttonFrames[i] = {
-			x = cfg.padding,
-			y = y,
-			w = sb.w - cfg.padding * 2,
-			h = btnH,
-			windowId = winId,
-		}
-		y = y + btnH + 4
-	end
-	self._pendingSidebarFrame = nil
-end
-
 function obj:_doBuildSidebar()
 	if not self._sidebarVisible then
 		self._buildPending = false
@@ -1221,16 +1166,16 @@ function obj:_doBuildSidebar()
 	local needsFullRebuild = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
 
 	local orderedWins = self:_orderedWindows(wins)
-	local winData, needsAnyWindowRebuild, maxNumRows = self:_gatherWindowData(orderedWins)
+	local winData = self:_gatherWindowData(orderedWins)
+	local maxNumRows = 1
+	for _, wd in ipairs(winData) do
+		if #wd.textRows > maxNumRows then
+			maxNumRows = #wd.textRows
+		end
+	end
 	local btnH = computeBtnHeight(maxNumRows, cfg.defaultFontSize)
 
-	local ok, err = pcall(function()
-		if needsFullRebuild then
-			self:_renderFullSidebar(sb, winData, structureSnap, btnH)
-		elseif needsAnyWindowRebuild then
-			self:_renderInPlace(winData, sb, btnH)
-		end
-	end)
+	self:_renderFullSidebar(sb, winData, structureSnap, btnH)
 
 	self._buildPending = false
 	self:syncCanvasLevel()
@@ -1242,10 +1187,6 @@ function obj:_doBuildSidebar()
 		end
 	end
 	self._skipTileOnThisBuild = false
-
-	if not ok then
-		hs.printf("buildSidebar crashed: %s", tostring(err))
-	end
 end
 
 -- ─────────────────────────────────────────────
@@ -2737,8 +2678,6 @@ function obj:stop()
 		self._claudeAgentsPollTimer = nil
 	end
 	_claudeAgentsData = {}
-	self._elementMap = {}
-	self._btnStructureKeys = {}
 	self._pendingPathNames = {}
 	self._lastSidebarSnapshot = nil
 	self._lastStructureSnapshot = nil
@@ -2777,8 +2716,6 @@ function obj:init()
 	self._claudeAgentsPollTimer = nil
 	self._ghAvailable = false
 	self._btnBgElements = {}
-	self._elementMap = {}
-	self._btnStructureKeys = {}
 	self._lastSidebarSnapshot = nil
 	self._lastStructureSnapshot = nil
 	_iTermWindowsCache = nil

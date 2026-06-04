@@ -1,5 +1,7 @@
 ## 2026-06-04
 
+- **Single render path**: removed `_renderInPlace()` and all dual-path machinery (`_elementMap`, `_btnStructureKeys`, `buttonStructureKey()`, `bKey`, `needsAnyWindowRebuild`). `_doBuildSidebar()` now always calls `_renderFullSidebar()` — the `sidebarStateSnapshot()` early-exit guard already prevents unnecessary work. This eliminates the class of bug where text element frames desync from click areas when row counts change (e.g., a claude `waitingFor` line appears). ~80 lines removed.
+
 - **Fixed `getWindowWorkingDir()`**: changed AppleScript to match by window title (`whose name = "..."`) instead of by CGWindowID (`whose id is %d`). Hammerspoon's `win:id()` returns a CGWindowID that does not match iTerm2's AppleScript window ID, causing every path lookup to fail (`Can't get current session`) and leaving `_wdCache[winId] = false`. Title-based matching with proper `\` and `"` escaping unblocks git branch display, claude section, and opencode path matching.
 
 - **Removed Claude Code .jsonl parsing**: the never-relaible file-based reading of `~/.claude/projects/*.jsonl` for model/token data has been removed along with `claudeEncodeDir()`, `claudeProjectDir()`, `fetchClaudeCodeForWindow()`, `fetchClaudeCodeData()`, and all associated caches/render code. The `claudecode` config key is kept for backward compat.
