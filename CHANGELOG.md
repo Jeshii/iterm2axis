@@ -1,3 +1,10 @@
+## 2026-06-04
+
+- **Removed Claude Code .jsonl parsing**: the never-relaible file-based reading of `~/.claude/projects/*.jsonl` for model/token data has been removed along with `claudeEncodeDir()`, `claudeProjectDir()`, `fetchClaudeCodeForWindow()`, `fetchClaudeCodeData()`, and all associated caches/render code. The `claudecode` config key is kept for backward compat.
+- **Replaced with `claude agents --json` polling**: new `fetchClaudeAgentsData()` runs `claude agents --json` on each poll interval (default 5s), parses structured JSON indexed by `cwd`, and populates `_claudeAgentsData[cwd] = { status, waitingFor }`. Matches windows by their working directory (`_wdCache`). New `startClaudeAgentsPolling()` wired into `start()`/`stop()`/`init()`. The `claudeState()` title-based heuristic (`✳`/`·`/`🔔`) is kept for flash responsiveness; `claude agents --json` status will be preferred for button color in a follow-up.
+- **`_gatherWindowData()`** now skips the redundant `cfg` parameter (module-level `cfg` is already in scope).
+- **Configurable font sizes**: added `defaultFontSize` config option (default `11`). Line 1 (label) renders at `defaultFontSize + 1`, lines 2–3 (basename/branch) at `defaultFontSize`, lines 4–5 (opencode/claudecode) at `defaultFontSize - 1`. Button height auto-calculates from the font sizes via `btnHeight()`/`btnFontSizes()` helpers.
+
 ## 2026-06-03
 
 - **Extracted `_rebuildAfterSettle()` helper**: consolidated 4 identical `hs.timer.doAfter(settleDelay, ...)` blocks from windowCreated/windowDestroyed/windowMinimized/windowUnminimized watcher callbacks into a single `_rebuildAfterSettle(tileWhenHidden)` method — reduces duplication, makes the settle-delay pattern explicit

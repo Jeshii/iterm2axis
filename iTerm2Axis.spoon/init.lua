@@ -23,6 +23,7 @@ local HAMMERSPOON_BID = "org.hammerspoon.Hammerspoon"
 obj.config = {
 	debug = false,
 	sidebarWidth = 200,
+	defaultFontSize = 15,
 	sidebarSide = "left",
 	startHidden = false,
 	sidebarColor = { red = 0.12, green = 0.12, blue = 0.14, alpha = 0.95 },
@@ -30,8 +31,9 @@ obj.config = {
 	activeButtonColor = { red = 0.25, green = 0.4, blue = 0.6, alpha = 1 },
 	textColor = { red = 0.9, green = 0.9, blue = 0.9, alpha = 1 },
 	dragHighlightColor = { red = 0.3, green = 0.7, blue = 0.4, alpha = 0.9 },
+	waitingFlashColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
+	prColor = { red = 0.85, green = 0.6, blue = 0.9, alpha = 0.95 },
 
-	windowButtonHeight = 90, -- tall enough for 5 lines (opencode + claudecode)
 	padding = 8,
 
 	settleDelay = 0.3,
@@ -46,7 +48,6 @@ obj.config = {
 		enabled = true,
 		pollInterval = 5,
 		flashInterval = 2.0,
-		projectsDir = os.getenv("HOME") .. "/.claude/projects",
 	},
 
 	bell = {
@@ -55,24 +56,25 @@ obj.config = {
 		flashColor = { red = 0.95, green = 0.85, blue = 0.4, alpha = 0.85 },
 	},
 }
+local cfg = obj.config
 
 -- ─────────────────────────────────────────────
 -- Helpers
 -- ─────────────────────────────────────────────
 
 local function loadVersion()
-    local scriptPath = hs.spoons.scriptPath()
-    if scriptPath then
-        local versionPath = scriptPath:gsub("init%.lua$", "VERSION")
-        local f = io.open(versionPath, "r")
-        if f then
-            local v = f:read("*l")
-            f:close()
-            if v and v ~= "" then
-                obj.version = v
-            end
-        end
-    end
+	local scriptPath = hs.spoons.scriptPath()
+	if scriptPath then
+		local versionPath = scriptPath:gsub("init%.lua$", "VERSION")
+		local f = io.open(versionPath, "r")
+		if f then
+			local v = f:read("*l")
+			f:close()
+			if v and v ~= "" then
+				obj.version = v
+			end
+		end
+	end
 end
 loadVersion()
 
@@ -121,6 +123,29 @@ end
 
 local function color(c)
 	return { red = c.red, green = c.green, blue = c.blue, alpha = c.alpha }
+end
+
+local function btnFontSizes(dfs)
+	return {
+		[1] = dfs + 1,
+		[2] = dfs,
+		[3] = dfs,
+		[4] = dfs - 1,
+		[5] = dfs - 1,
+	}
+end
+
+local function btnHeight(dfs)
+	local sz = btnFontSizes(dfs)
+	local function lh(i)
+		return sz[i] + 4
+	end
+	local gap = 3
+	local ly = { 5 }
+	for i = 2, 5 do
+		ly[i] = ly[i - 1] + lh(i - 1) + gap
+	end
+	return ly[5] + lh(5) + 6
 end
 
 local BAR_H = 18
@@ -342,11 +367,8 @@ local _flashState = {}
 local _flashNormalColor = {}
 local _flashType = {}
 
--- Per-window Claude Code data cache, keyed by windowId.
--- Uses hs.task for async .jsonl reads so buildSidebar never blocks.
-local _ccCache = {} -- [winId] = { model, tokensIn, tokensOut } or false
-local _ccPending = {} -- [winId] = true (fetch in flight)
-local _ccPathKey = {} -- [winId] = fullPath last fetched (invalidation key)
+-- Cache for `claude agents --json` data, keyed by cwd.
+local _claudeAgentsData = {} -- [cwd] = { status, waitingFor }
 
 local function claudeState(win)
 	local title = win:title() or ""
@@ -371,21 +393,20 @@ local function startFlashing(winId, flashType)
 	_flashType[winId] = flashType
 	_flashState[winId] = true
 	local isActive = (winId == obj.activeWindowId)
-	_flashNormalColor[winId] = isActive and obj.config.activeButtonColor or obj.config.buttonColor
+	_flashNormalColor[winId] = isActive and cfg.activeButtonColor or cfg.buttonColor
 	_flashingWindows[winId] = true
 
 	if not _sharedFlashTimer then
-		local interval = (flashType == "bell") and obj.config.bell.flashInterval or obj.config.claudecode.flashInterval
+		local interval = (flashType == "bell") and cfg.bell.flashInterval or cfg.claudecode.flashInterval
 		_sharedFlashTimer = hs.timer.new(interval, function()
 			for wid in pairs(_flashingWindows) do
 				_flashState[wid] = not _flashState[wid]
 				local bgIdx = obj._btnBgElements[wid]
 				if bgIdx and obj.sidebarCanvas and obj.sidebarCanvas:isShowing() then
 					local normalCol = _flashNormalColor[wid]
-					local flashColor = (_flashType[wid] == "bell") and obj.config.bell.flashColor
-						or { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+					local flashColor = (_flashType[wid] == "bell") and cfg.bell.flashColor or cfg.waitingFlashColor
 					local newColor = _flashState[wid] and flashColor
-						or (normalCol and color(normalCol) or color(obj.config.buttonColor))
+						or (normalCol and color(normalCol) or color(cfg.buttonColor))
 					obj.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
 				end
 			end
@@ -439,16 +460,54 @@ local function fmtTokens(n)
 end
 
 -- ─────────────────────────────────────────────
--- Claude Code helpers
+-- Claude CLI agents polling
 -- ─────────────────────────────────────────────
 
-local function claudeEncodeDir(absPath)
-	return absPath:gsub("^/", ""):gsub("/", "-")
+function obj:fetchClaudeAgentsData()
+	if self._claudeAgentsPending then
+		return
+	end
+	self._claudeAgentsPending = true
+
+	hs.task
+		.new("/usr/bin/env", function(_, stdout, _)
+			self._claudeAgentsPending = false
+			local newData = {}
+			if stdout and stdout ~= "" then
+				local ok, agents = pcall(hs.json.decode, stdout)
+				if ok and type(agents) == "table" then
+					for _, a in ipairs(agents) do
+						if a.cwd then
+							newData[a.cwd] = {
+								status = a.status,
+								waitingFor = a.waitingFor,
+							}
+						end
+					end
+				end
+			end
+			_claudeAgentsData = newData
+			if self.sidebarCanvas and self._sidebarEnabled then
+				self:buildSidebar()
+			end
+		end, { "claude", "agents", "--json" })
+		:start()
 end
 
-local function claudeProjectDir(absPath)
-	return os.getenv("HOME") .. "/.claude/projects/" .. claudeEncodeDir(absPath)
+function obj:startClaudeAgentsPolling()
+	self:fetchClaudeAgentsData()
+	if self._claudeAgentsPollTimer then
+		self._claudeAgentsPollTimer:stop()
+	end
+	self._claudeAgentsPollTimer = hs.timer.new(self.config.claudecode.pollInterval, function()
+		self:fetchClaudeAgentsData()
+	end)
+	self._claudeAgentsPollTimer:start()
 end
+
+-- ─────────────────────────────────────────────
+-- PR helpers
+-- ─────────────────────────────────────────────
 
 -- Per-window PR cache, keyed by windowId.
 -- Uses hs.task for async gh pr view so buildSidebar never blocks.
@@ -620,124 +679,6 @@ function obj:startOpenCodePolling()
 	self._opencodePollTimer:start()
 end
 
-local function fetchClaudeCodeForWindow(win, fullPath, callback)
-	local winId = win:id()
-
-	-- Already have fresh data for this path
-	if _ccPathKey[winId] == fullPath and _ccCache[winId] ~= nil then
-		if callback then
-			callback()
-		end
-		return
-	end
-
-	-- Fetch already in flight
-	if _ccPending[winId] then
-		if callback then
-			callback()
-		end
-		return
-	end
-	_ccPending[winId] = true
-
-	local projectDir = claudeProjectDir(fullPath)
-
-	-- Step 1: find the latest .jsonl file (async)
-	hs.task
-		.new("/bin/sh", function(_, latestFile, _)
-			latestFile = latestFile and latestFile:gsub("%s+$", "") or ""
-			if latestFile == "" then
-				_ccPending[winId] = nil
-				_ccCache[winId] = false
-				_ccPathKey[winId] = fullPath
-				if callback then
-					callback()
-				end
-				return
-			end
-
-			-- Step 2: tail the file (async, chained)
-			hs.task
-				.new("/bin/sh", function(_, content, _)
-					_ccPending[winId] = nil
-					local model, tokensIn, tokensOut = nil, 0, 0
-					for line in (content or ""):gmatch("[^\n]+") do
-						local ok, msg = pcall(hs.json.decode, line)
-						if ok and type(msg) == "table" and msg.type == "assistant" and msg.message then
-							if msg.message.model then
-								model = msg.message.model
-							end
-							if msg.message.usage then
-								local u = msg.message.usage
-								tokensIn = tokensIn + (u.input_tokens or 0)
-								tokensOut = tokensOut + (u.output_tokens or 0)
-							end
-						end
-					end
-					_ccCache[winId] = (model or tokensIn > 0)
-							and { model = model, tokensIn = tokensIn, tokensOut = tokensOut }
-						or false
-					_ccPathKey[winId] = fullPath
-					if callback then
-						callback()
-					end
-				end, { "-c", "tail -50 '" .. latestFile .. "' 2>/dev/null" })
-				:start()
-		end, { "-c", "ls -t '" .. projectDir .. "'/*.jsonl 2>/dev/null | head -1" })
-		:start()
-end
-
-function obj:fetchClaudeCodeData()
-	local wins = getITermWindows()
-	if #wins == 0 then
-		return
-	end
-
-	local pending = #wins
-	if pending == 0 then
-		return
-	end
-
-	local function oneDone()
-		pending = pending - 1
-		if pending == 0 then
-			local newData = {}
-			for _, win in ipairs(wins) do
-				local id = win:id()
-				local fp = _wdCache[id]
-				if fp and _ccCache[id] then
-					newData[fp] = _ccCache[id]
-				end
-			end
-			self._claudeCodeData = newData
-			if self.sidebarCanvas and self._sidebarEnabled then
-				self:buildSidebar()
-			end
-		end
-	end
-
-	for _, win in ipairs(wins) do
-		-- Phase 3 fix #5: use getWindowWorkingDir to trigger async fetch if cold
-		local fullPath = getWindowWorkingDir(win)
-		if not fullPath then
-			oneDone()
-		else
-			fetchClaudeCodeForWindow(win, fullPath, oneDone)
-		end
-	end
-end
-
-function obj:startClaudeCodePolling()
-	self:fetchClaudeCodeData()
-	if self._claudeCodePollTimer then
-		self._claudeCodePollTimer:stop()
-	end
-	self._claudeCodePollTimer = hs.timer.new(self.config.claudecode.pollInterval, function()
-		self:fetchClaudeCodeData()
-	end)
-	self._claudeCodePollTimer:start()
-end
-
 -- ─────────────────────────────────────────────
 -- Layout
 -- ─────────────────────────────────────────────
@@ -769,7 +710,6 @@ function obj:getScreen()
 end
 
 function obj:layoutFrames(screenFrame, anchorFrame)
-	local cfg = self.config
 	local isLeft = cfg.sidebarSide ~= "right"
 	local sw = cfg.sidebarWidth
 	local sf, af = screenFrame, anchorFrame
@@ -822,21 +762,12 @@ local function ocSnippet(data, fullPath)
 	return tostring(d.tokensIn or 0) .. "/" .. tostring(d.tokensOut or 0)
 end
 
--- Phase 3 fix #3: snapshot reads _ccCache[id] directly per-window so it
--- reflects the latest async fetch rather than the batched _claudeCodeData table.
-local function ccSnippet(winId)
-	local d = _ccCache[winId]
-	if not d then
-		return ""
-	end
-	return tostring(d.tokensIn or 0) .. "/" .. tostring(d.tokensOut or 0)
-end
-
 local function sidebarStateSnapshot(wins, activeId, opencodeData)
 	local parts = {}
 	for _, win in ipairs(wins) do
 		local id = win:id()
 		local fullPath = _wdCache[id] or ""
+		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
 		table.insert(
 			parts,
 			table.concat({
@@ -850,7 +781,8 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData)
 				tostring(_gitBranchCache[id] or ""),
 				tostring(_gitWsNameCache[id] or ""),
 				ocSnippet(opencodeData, fullPath),
-				ccSnippet(id),
+				tostring(claudeAgent and claudeAgent.status or ""),
+				tostring(claudeAgent and claudeAgent.waitingFor or ""),
 			}, "\t")
 		)
 	end
@@ -861,13 +793,12 @@ local function sidebarStructureSnapshot(wins, sbW, sbH)
 	return #wins .. ":" .. sbW .. "x" .. sbH
 end
 
-local function buttonStructureKey(basename, branch, prFromTitle, wsName, ocData, ccData)
+local function buttonStructureKey(basename, branch, prFromTitle, wsName, ocData)
 	return (basename and "1" or "0")
 		.. (branch and "1" or "0")
 		.. (prFromTitle and "1" or "0")
 		.. (wsName and "1" or "0")
 		.. (ocData and "1" or "0")
-		.. (ccData and "1" or "0")
 end
 
 -- Returns { text, color } for Line 3 based on workspace priority.
@@ -876,7 +807,7 @@ local function line3Display(wd)
 	if wd.prFromTitle then
 		return {
 			text = "⎇ PR #" .. wd.prFromTitle,
-			color = { red = 0.85, green = 0.6, blue = 0.9, alpha = 0.95 },
+			color = cfg.prColor,
 		}
 	elseif wd.wsName then
 		return {
@@ -952,7 +883,7 @@ function obj:_orderedWindows(wins)
 	return itermWins
 end
 
-function obj:_gatherWindowData(orderedWins, cfg)
+function obj:_gatherWindowData(orderedWins)
 	local winData = {}
 	local needsAnyWindowRebuild = false
 	for i, win in ipairs(orderedWins) do
@@ -967,7 +898,7 @@ function obj:_gatherWindowData(orderedWins, cfg)
 		if isDragHover then
 			btnColor = cfg.dragHighlightColor
 		elseif state == "waiting" and _flashState[winId] and not isFocused then
-			btnColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 }
+			btnColor = cfg.waitingFlashColor
 		elseif state == "bell" and _flashState[winId] and not isFocused then
 			btnColor = cfg.bell.flashColor
 		elseif state == "busy" then
@@ -1004,8 +935,7 @@ function obj:_gatherWindowData(orderedWins, cfg)
 				end
 			end
 		end
-		local ccData = _ccCache[winId]
-		local bKey = buttonStructureKey(basename, branch, prFromTitle, wsName, ocData, ccData)
+		local bKey = buttonStructureKey(basename, branch, prFromTitle, wsName, ocData)
 
 		if self._btnStructureKeys[winId] ~= bKey then
 			needsAnyWindowRebuild = true
@@ -1021,14 +951,13 @@ function obj:_gatherWindowData(orderedWins, cfg)
 			wsName = wsName,
 			prFromTitle = prFromTitle,
 			ocData = ocData,
-			ccData = ccData,
 			bKey = bKey,
 		}
 	end
 	return winData, needsAnyWindowRebuild
 end
 
-function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
+function obj:_renderFullSidebar(sb, winData, structureSnap)
 	if self.sidebarCanvas then
 		if not self._pendingSidebarFrame then
 			self._pendingSidebarFrame = self.sidebarCanvas:frame()
@@ -1065,6 +994,18 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
 	local elemIdx = 3
 	local y = 6
 
+	local sz = btnFontSizes(cfg.defaultFontSize)
+	local lh = {}
+	for i = 1, 5 do
+		lh[i] = sz[i] + 4
+	end
+	local gap = 3
+	local ly = { 5 }
+	for i = 2, 5 do
+		ly[i] = ly[i - 1] + lh[i - 1] + gap
+	end
+	local btnH = btnHeight(cfg.defaultFontSize)
+
 	self._btnBgElements = {}
 	self._buttonFrames = {}
 
@@ -1073,7 +1014,7 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
 
 		self.sidebarCanvas:appendElements({
 			type = "rectangle",
-			frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = cfg.windowButtonHeight },
+			frame = { x = cfg.padding, y = y, w = sb.w - cfg.padding * 2, h = btnH },
 			fillColor = color(wd.btnColor),
 			strokeWidth = 0,
 			roundedRectRadii = { xRadius = 4, yRadius = 4 },
@@ -1083,10 +1024,10 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
 
 		self.sidebarCanvas:appendElements({
 			type = "text",
-			frame = { x = textX, y = y + 5, w = textW, h = 15 },
+			frame = { x = textX, y = y + ly[1], w = textW, h = lh[1] },
 			text = wd.label,
 			textColor = color(cfg.textColor),
-			textSize = 11,
+			textSize = sz[1],
 			textAlignment = "left",
 		})
 		map.line1 = elemIdx
@@ -1095,10 +1036,10 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
 		if wd.basename then
 			self.sidebarCanvas:appendElements({
 				type = "text",
-				frame = { x = textX, y = y + 22, w = textW, h = 13 },
+				frame = { x = textX, y = y + ly[2], w = textW, h = lh[2] },
 				text = wd.basename,
 				textColor = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
-				textSize = 10,
+				textSize = sz[2],
 				textAlignment = "left",
 			})
 			map.line2 = elemIdx
@@ -1109,10 +1050,10 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
 		if l3 then
 			self.sidebarCanvas:appendElements({
 				type = "text",
-				frame = { x = textX, y = y + 38, w = textW, h = 13 },
+				frame = { x = textX, y = y + ly[3], w = textW, h = lh[3] },
 				text = l3.text,
 				textColor = l3.color,
-				textSize = 10,
+				textSize = sz[3],
 				textAlignment = "left",
 			})
 			map.line3 = elemIdx
@@ -1142,45 +1083,13 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
 			local ocText = table.concat(segments, "  ")
 			self.sidebarCanvas:appendElements({
 				type = "text",
-				frame = { x = textX, y = y + 53, w = textW, h = 12 },
+				frame = { x = textX, y = y + ly[4], w = textW, h = lh[4] },
 				text = ocText,
 				textColor = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
-				textSize = 9,
+				textSize = sz[4],
 				textAlignment = "left",
 			})
 			map.line4 = elemIdx
-			elemIdx = elemIdx + 1
-		end
-
-		if wd.ccData then
-			local modelShort = shortModelName(wd.ccData.model) or ""
-			local tokStr = ""
-			if wd.ccData.tokensIn > 0 then
-				tokStr = fmtTokens(wd.ccData.tokensIn) .. "▲ " .. fmtTokens(wd.ccData.tokensOut) .. "▼"
-			end
-			local pr = wd.prFromTitle and { number = wd.prFromTitle, title = "" }
-				or (self._ghAvailable and getOpenPRForWindow(wd.win) or nil)
-			local prStr = pr and ("#" .. pr.number) or ""
-			local segments = {}
-			if modelShort ~= "" then
-				table.insert(segments, "cc:" .. modelShort)
-			end
-			if tokStr ~= "" then
-				table.insert(segments, tokStr)
-			end
-			if prStr ~= "" then
-				table.insert(segments, prStr)
-			end
-			local ccText = table.concat(segments, "  ")
-			self.sidebarCanvas:appendElements({
-				type = "text",
-				frame = { x = textX, y = y + 68, w = textW, h = 12 },
-				text = ccText,
-				textColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
-				textSize = 9,
-				textAlignment = "left",
-			})
-			map.line5 = elemIdx
 			elemIdx = elemIdx + 1
 		end
 
@@ -1205,10 +1114,10 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
 			x = cfg.padding,
 			y = y,
 			w = sb.w - cfg.padding * 2,
-			h = cfg.windowButtonHeight,
+			h = btnH,
 			windowId = winId,
 		}
-		y = y + cfg.windowButtonHeight + 4
+		y = y + btnH + 4
 	end
 
 	local barY = sb.h - BAR_H - BAR_BOTTOM_MARGIN
@@ -1244,8 +1153,9 @@ function obj:_renderFullSidebar(sb, winData, structureSnap, cfg)
 	self._pendingSidebarFrame = nil
 end
 
-function obj:_renderInPlace(winData, sb, cfg)
+function obj:_renderInPlace(winData, sb)
 	self._buttonFrames = {}
+	local btnH = btnHeight(cfg.defaultFontSize)
 	local y = 6
 	for i, wd in ipairs(winData) do
 		local winId = wd.winId
@@ -1289,28 +1199,6 @@ function obj:_renderInPlace(winData, sb, cfg)
 			end
 			if map.line5 then
 				local ccText = ""
-				if wd.ccData then
-					local modelShort = shortModelName(wd.ccData.model) or ""
-					local tokStr = ""
-					if wd.ccData.tokensIn > 0 then
-						tokStr = fmtTokens(wd.ccData.tokensIn) .. "▲ " .. fmtTokens(wd.ccData.tokensOut) .. "▼"
-					end
-					local win = hs.window.get(winId)
-					local pr = wd.prFromTitle and { number = wd.prFromTitle, title = "" }
-						or (win and self._ghAvailable and getOpenPRForWindow(win) or nil)
-					local prStr = pr and ("#" .. pr.number) or ""
-					local segments = {}
-					if modelShort ~= "" then
-						table.insert(segments, "cc:" .. modelShort)
-					end
-					if tokStr ~= "" then
-						table.insert(segments, tokStr)
-					end
-					if prStr ~= "" then
-						table.insert(segments, prStr)
-					end
-					ccText = table.concat(segments, "  ")
-				end
 				self.sidebarCanvas:elementAttribute(map.line5, "text", ccText)
 			end
 		end
@@ -1321,10 +1209,10 @@ function obj:_renderInPlace(winData, sb, cfg)
 			x = cfg.padding,
 			y = y,
 			w = sb.w - cfg.padding * 2,
-			h = cfg.windowButtonHeight,
+			h = btnH,
 			windowId = winId,
 		}
-		y = y + cfg.windowButtonHeight + 4
+		y = y + btnH + 4
 	end
 	self._pendingSidebarFrame = nil
 end
@@ -1360,19 +1248,18 @@ function obj:_doBuildSidebar()
 	self._lastSidebarSnapshot = snap
 
 	local sb = self:layoutFrames(self:getScreen():frame(), self:getSidebarAnchor()).sidebar
-	local cfg = self.config
 
 	local structureSnap = sidebarStructureSnapshot(wins, sb.w, sb.h)
 	local needsFullRebuild = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
 
 	local orderedWins = self:_orderedWindows(wins)
-	local winData, needsAnyWindowRebuild = self:_gatherWindowData(orderedWins, cfg)
+	local winData, needsAnyWindowRebuild = self:_gatherWindowData(orderedWins)
 
 	local ok, err = pcall(function()
 		if needsFullRebuild then
-			self:_renderFullSidebar(sb, winData, structureSnap, cfg)
+			self:_renderFullSidebar(sb, winData, structureSnap)
 		elseif needsAnyWindowRebuild then
-			self:_renderInPlace(winData, sb, cfg)
+			self:_renderInPlace(winData, sb)
 		end
 	end)
 
@@ -2265,7 +2152,6 @@ function obj:handleWindowMoveOrResize()
 			return
 		end
 
-		local cfg = self.config
 		local currentAnchor = self:getSidebarAnchor()
 		local sf = newScreen:frame()
 
@@ -2420,7 +2306,6 @@ function obj:bindHotkeys(mapping)
 	hs.hotkey.bind(focusDownMods, focusDownKey, function()
 		self:focusNextWindow(1)
 	end)
-
 end
 
 -- ─────────────────────────────────────────────
@@ -2447,7 +2332,7 @@ function obj:_setupSidebarClickTap()
 		end
 		local mouse = e:location()
 		if rectContains(sf, mouse.x, mouse.y) then
-			 if not isSidebarClickAllowed() then
+			if not isSidebarClickAllowed() then
 				return false
 			end
 			local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
@@ -2495,7 +2380,7 @@ function obj:_setupDragTap()
 			if not isSidebarClickAllowed() then
 				return false
 			end
-			
+
 			self._dragActive = true
 			local lx = mouse.x - sf.x
 			local ly = mouse.y - sf.y
@@ -2559,9 +2444,6 @@ function obj:_setupWindowWatcher()
 			_prPending[id] = nil
 			_wdCache[id] = nil
 			_wdFlight[id] = nil
-			_ccCache[id] = nil
-			_ccPending[id] = nil
-			_ccPathKey[id] = nil
 			stopFlashing(id)
 		end
 		_iTermWindowsCache = nil
@@ -2589,8 +2471,6 @@ function obj:_setupWindowWatcher()
 			isBellStateChange = title:match("^🔔")
 			if not isCCStateChange and not isBellStateChange then
 				_wdCache[id] = nil
-				_ccCache[id] = nil
-				_ccPathKey[id] = nil
 				_gitBranchCache[id] = nil
 				_gitWsNameCache[id] = nil
 			end
@@ -2787,7 +2667,7 @@ function obj:start()
 	end
 
 	if self.config.claudecode.enabled then
-		self:startClaudeCodePolling()
+		self:startClaudeAgentsPolling()
 	end
 
 	hs.alert.show("iTerm2 Axis loaded ✓", 1.5)
@@ -2877,18 +2757,17 @@ function obj:stop()
 	_flashState = {}
 	_flashNormalColor = {}
 	_flashType = {}
-	_ccCache = {}
-	_ccPending = {}
-	_ccPathKey = {}
 	self._opencodePending = false
 	if self._opencodePollTimer then
 		self._opencodePollTimer:stop()
 		self._opencodePollTimer = nil
 	end
-	if self._claudeCodePollTimer then
-		self._claudeCodePollTimer:stop()
-		self._claudeCodePollTimer = nil
+	self._claudeAgentsPending = false
+	if self._claudeAgentsPollTimer then
+		self._claudeAgentsPollTimer:stop()
+		self._claudeAgentsPollTimer = nil
 	end
+	_claudeAgentsData = {}
 	self._elementMap = {}
 	self._btnStructureKeys = {}
 	self._pendingPathNames = {}
@@ -2925,8 +2804,8 @@ function obj:init()
 	self._opencodeData = {}
 	self._opencodePending = false
 	self._opencodePollTimer = nil
-	self._claudeCodeData = {}
-	self._claudeCodePollTimer = nil
+	self._claudeAgentsPending = false
+	self._claudeAgentsPollTimer = nil
 	self._ghAvailable = false
 	self._btnBgElements = {}
 	self._elementMap = {}
@@ -2948,9 +2827,6 @@ function obj:init()
 	_flashState = {}
 	_flashNormalColor = {}
 	_flashType = {}
-	_ccCache = {}
-	_ccPending = {}
-	_ccPathKey = {}
 	self._renameMode = false
 	self._renameBuffer = ""
 	self._renameWindowId = nil
