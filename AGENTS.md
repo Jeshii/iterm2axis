@@ -38,6 +38,7 @@ A Hammerspoon window manager that provides a sidebar (configurable left or right
 - When debugging, ask the user to check Hammerspoon's Console (menu bar icon → Console) or run `/Applications/Hammerspoon.app/Contents/MacOS/Hammerspoon` from a terminal to see errors
 - Run `stylua` on any lua files you edit
 - Don't write monolithic, hard to read functions
+- If functionality already exists in iTerm2, don't try to recreate it
 - Do not push changes to the remote without asking first
 - Window label priority: custom rename → remote hostname (parts.host) → local PWD basename → "Window N" fallback
 - Update CHANGELOG.md after making any changes
