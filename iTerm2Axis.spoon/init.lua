@@ -125,27 +125,19 @@ local function color(c)
 	return { red = c.red, green = c.green, blue = c.blue, alpha = c.alpha }
 end
 
-local function btnFontSizes(dfs)
-	return {
-		[1] = dfs + 1,
-		[2] = dfs,
-		[3] = dfs,
-		[4] = dfs - 1,
-		[5] = dfs - 1,
-	}
-end
-
-local function btnHeight(dfs)
-	local sz = btnFontSizes(dfs)
-	local function lh(i)
-		return sz[i] + 4
+local function computeBtnHeight(numRows, dfs)
+	local PAD_TOP = 5
+	local PAD_BOTTOM = 6
+	local GAP = 3
+	local h = PAD_TOP
+	for rowPos = 1, numRows do
+		local fs = rowPos == 1 and (dfs + 1) or (rowPos <= 3 and dfs or dfs - 1)
+		h = h + fs + 4
+		if rowPos < numRows then
+			h = h + GAP
+		end
 	end
-	local gap = 3
-	local ly = { 5 }
-	for i = 2, 5 do
-		ly[i] = ly[i - 1] + lh(i - 1) + gap
-	end
-	return ly[5] + lh(5) + 6
+	return h + PAD_BOTTOM
 end
 
 local BAR_H = 18
@@ -246,11 +238,16 @@ local function getWindowWorkingDir(win)
 	end
 	_wdFlight[winId] = true
 
+	-- Match by window title instead of CGWindowID, since iTerm2's AppleScript
+	-- window ID differs from Hammerspoon's CGWindowID.
+	local title = (win:title() or ""):gsub("%s+[—–-]%s+%d+✕%d+%s*$", "")
+	local escapedTitle = title:gsub("\\", "\\\\"):gsub('"', '\\"')
+
 	local script = string.format(
 		[[
         tell application "iTerm2"
             try
-                tell (first window whose id is %d)
+                tell (first window whose name = "%s")
                     tell current session
                         return variable named "session.path"
                     end tell
@@ -260,7 +257,7 @@ local function getWindowWorkingDir(win)
             end try
         end tell
     ]],
-		winId
+		escapedTitle
 	)
 
 	hs.task
@@ -793,14 +790,6 @@ local function sidebarStructureSnapshot(wins, sbW, sbH)
 	return #wins .. ":" .. sbW .. "x" .. sbH
 end
 
-local function buttonStructureKey(basename, branch, prFromTitle, wsName, ocData)
-	return (basename and "1" or "0")
-		.. (branch and "1" or "0")
-		.. (prFromTitle and "1" or "0")
-		.. (wsName and "1" or "0")
-		.. (ocData and "1" or "0")
-end
-
 -- Returns { text, color } for Line 3 based on workspace priority.
 -- Priority: PR number → worktree name → plain branch
 local function line3Display(wd)
@@ -821,6 +810,56 @@ local function line3Display(wd)
 		}
 	end
 	return nil
+end
+
+local HEADER_COLOR = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 }
+local DETAIL_COLOR = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 }
+
+local function buildTextRows(wd)
+	local dfs = cfg.defaultFontSize
+	local rows = {}
+	table.insert(rows, { text = wd.label, fs = dfs + 1, color = cfg.textColor })
+	if wd.basename then
+		table.insert(rows, { text = wd.basename, fs = dfs, color = DETAIL_COLOR })
+	end
+	local l3 = line3Display(wd)
+	if l3 then
+		table.insert(rows, { text = l3.text, fs = dfs, color = l3.color })
+	end
+	if wd.ocData then
+		table.insert(rows, { text = "opencode", fs = dfs - 1, color = HEADER_COLOR })
+		local modelStr = shortModelName(wd.ocData.modelID)
+		if modelStr then
+			table.insert(rows, { text = modelStr, fs = dfs - 1, color = DETAIL_COLOR })
+		end
+		if wd.ocData.agent and wd.ocData.agent ~= "" then
+			table.insert(rows, { text = wd.ocData.agent, fs = dfs - 1, color = DETAIL_COLOR })
+		end
+		if wd.ocData.tokensIn and wd.ocData.tokensIn > 0 then
+			local tokStr = fmtTokens(wd.ocData.tokensIn) .. " in"
+			if wd.ocData.tokensOut and wd.ocData.tokensOut > 0 then
+				tokStr = tokStr .. " · " .. fmtTokens(wd.ocData.tokensOut) .. " out"
+			end
+			table.insert(rows, { text = tokStr, fs = dfs - 1, color = DETAIL_COLOR })
+		end
+	end
+	if wd.claudeAgent then
+		table.insert(rows, { text = "claude", fs = dfs - 1, color = HEADER_COLOR })
+		if wd.claudeAgent.waitingFor then
+			table.insert(
+				rows,
+				{ text = "⏳ " .. wd.claudeAgent.waitingFor, fs = dfs - 1, color = cfg.waitingFlashColor }
+			)
+		end
+		if wd.claudeAgent.status and wd.claudeAgent.status ~= "waiting" then
+			table.insert(rows, { text = wd.claudeAgent.status, fs = dfs - 1, color = DETAIL_COLOR })
+		end
+	end
+	return rows
+end
+
+local function buttonStructureKey(textRows)
+	return tostring(#textRows)
 end
 
 function obj:buildSidebar()
@@ -886,10 +925,24 @@ end
 function obj:_gatherWindowData(orderedWins)
 	local winData = {}
 	local needsAnyWindowRebuild = false
+	local maxNumRows = 1
 	for i, win in ipairs(orderedWins) do
 		local winId = win:id()
 		local isActive = (winId == self.activeWindowId)
+		local rawTitle = win:title() or ""
+		local parts = parseTitleComponents(rawTitle)
+		local fullPath = getWindowWorkingDir(win)
+		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
+		-- Prefer claude agents --json status over title heuristic.
+		-- Bell state is kept from title only (not in agents data).
 		local state = claudeState(win)
+		if claudeAgent and claudeAgent.status and claudeAgent.status ~= "idle" then
+			if claudeAgent.status == "waiting" then
+				state = "waiting"
+			elseif claudeAgent.status == "busy" then
+				state = "busy"
+			end
+		end
 		local btnColor
 		local focusedWin = hs.window.focusedWindow()
 		local isFocused = focusedWin and focusedWin:id() == winId
@@ -908,13 +961,10 @@ function obj:_gatherWindowData(orderedWins)
 		else
 			btnColor = cfg.buttonColor
 		end
-		local rawTitle = win:title() or ""
-		local parts = parseTitleComponents(rawTitle)
 		local prFromTitle = parsePRFromTitle(rawTitle)
 		if prFromTitle and prFromTitle <= 0 then
 			prFromTitle = nil
 		end
-		local fullPath = getWindowWorkingDir(win)
 		local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
 		local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
 		local wsName = _gitWsNameCache[winId] or nil
@@ -935,7 +985,16 @@ function obj:_gatherWindowData(orderedWins)
 				end
 			end
 		end
-		local bKey = buttonStructureKey(basename, branch, prFromTitle, wsName, ocData)
+		local textRows = buildTextRows({
+			label = label,
+			basename = basename,
+			branch = branch,
+			wsName = wsName,
+			prFromTitle = prFromTitle,
+			ocData = ocData,
+			claudeAgent = claudeAgent,
+		})
+		local bKey = buttonStructureKey(textRows)
 
 		if self._btnStructureKeys[winId] ~= bKey then
 			needsAnyWindowRebuild = true
@@ -951,13 +1010,32 @@ function obj:_gatherWindowData(orderedWins)
 			wsName = wsName,
 			prFromTitle = prFromTitle,
 			ocData = ocData,
+			claudeAgent = claudeAgent,
+			textRows = textRows,
 			bKey = bKey,
 		}
+		if #textRows > maxNumRows then
+			maxNumRows = #textRows
+		end
 	end
-	return winData, needsAnyWindowRebuild
+	return winData, needsAnyWindowRebuild, maxNumRows
 end
 
-function obj:_renderFullSidebar(sb, winData, structureSnap)
+local PAD_TOP = 5
+local GAP = 3
+
+local function computeTextArea(textW, rows)
+	local areas = {}
+	local y = PAD_TOP
+	for _, row in ipairs(rows) do
+		local rh = row.fs + 4
+		table.insert(areas, { x = 6, y = y, w = textW, h = rh })
+		y = y + rh + GAP
+	end
+	return areas
+end
+
+function obj:_renderFullSidebar(sb, winData, structureSnap, btnH)
 	if self.sidebarCanvas then
 		if not self._pendingSidebarFrame then
 			self._pendingSidebarFrame = self.sidebarCanvas:frame()
@@ -990,27 +1068,16 @@ function obj:_renderFullSidebar(sb, winData, structureSnap)
 	})
 
 	local textW = sb.w - cfg.padding * 2 - 12
-	local textX = cfg.padding + 6
 	local elemIdx = 3
 	local y = 6
-
-	local sz = btnFontSizes(cfg.defaultFontSize)
-	local lh = {}
-	for i = 1, 5 do
-		lh[i] = sz[i] + 4
-	end
-	local gap = 3
-	local ly = { 5 }
-	for i = 2, 5 do
-		ly[i] = ly[i - 1] + lh[i - 1] + gap
-	end
-	local btnH = btnHeight(cfg.defaultFontSize)
 
 	self._btnBgElements = {}
 	self._buttonFrames = {}
 
 	for i, wd in ipairs(winData) do
 		local winId = wd.winId
+		local rows = wd.textRows
+		local areas = computeTextArea(textW, rows)
 
 		self.sidebarCanvas:appendElements({
 			type = "rectangle",
@@ -1021,75 +1088,19 @@ function obj:_renderFullSidebar(sb, winData, structureSnap)
 		})
 		local map = { bg = elemIdx }
 		elemIdx = elemIdx + 1
+		map.rows = {}
 
-		self.sidebarCanvas:appendElements({
-			type = "text",
-			frame = { x = textX, y = y + ly[1], w = textW, h = lh[1] },
-			text = wd.label,
-			textColor = color(cfg.textColor),
-			textSize = sz[1],
-			textAlignment = "left",
-		})
-		map.line1 = elemIdx
-		elemIdx = elemIdx + 1
-
-		if wd.basename then
+		for ri, row in ipairs(rows) do
+			local a = areas[ri]
 			self.sidebarCanvas:appendElements({
 				type = "text",
-				frame = { x = textX, y = y + ly[2], w = textW, h = lh[2] },
-				text = wd.basename,
-				textColor = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 },
-				textSize = sz[2],
+				frame = { x = cfg.padding + 6, y = y + a.y, w = a.w, h = a.h },
+				text = row.text,
+				textColor = color(row.color),
+				textSize = row.fs,
 				textAlignment = "left",
 			})
-			map.line2 = elemIdx
-			elemIdx = elemIdx + 1
-		end
-
-		local l3 = line3Display(wd)
-		if l3 then
-			self.sidebarCanvas:appendElements({
-				type = "text",
-				frame = { x = textX, y = y + ly[3], w = textW, h = lh[3] },
-				text = l3.text,
-				textColor = l3.color,
-				textSize = sz[3],
-				textAlignment = "left",
-			})
-			map.line3 = elemIdx
-			elemIdx = elemIdx + 1
-		end
-
-		if wd.ocData then
-			local modelStr = shortModelName(wd.ocData.modelID) or ""
-			local agentStr = wd.ocData.agent or ""
-			local tokStr = ""
-			if wd.ocData.tokensIn and wd.ocData.tokensIn > 0 then
-				tokStr = fmtTokens(wd.ocData.tokensIn) .. " in"
-				if wd.ocData.tokensOut and wd.ocData.tokensOut > 0 then
-					tokStr = tokStr .. " · " .. fmtTokens(wd.ocData.tokensOut) .. " out"
-				end
-			end
-			local segments = {}
-			if modelStr ~= "" then
-				table.insert(segments, modelStr)
-			end
-			if agentStr ~= "" then
-				table.insert(segments, agentStr)
-			end
-			if tokStr ~= "" then
-				table.insert(segments, tokStr)
-			end
-			local ocText = table.concat(segments, "  ")
-			self.sidebarCanvas:appendElements({
-				type = "text",
-				frame = { x = textX, y = y + ly[4], w = textW, h = lh[4] },
-				text = ocText,
-				textColor = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 },
-				textSize = sz[4],
-				textAlignment = "left",
-			})
-			map.line4 = elemIdx
+			map.rows[ri] = elemIdx
 			elemIdx = elemIdx + 1
 		end
 
@@ -1098,16 +1109,7 @@ function obj:_renderFullSidebar(sb, winData, structureSnap)
 		self._btnBgElements[winId] = map.bg
 
 		if self.config.debug then
-			hs.printf(
-				"elementMap[%d]: bg=%s l1=%s l2=%s l3=%s l4=%s l5=%s",
-				winId,
-				tostring(map.bg),
-				tostring(map.line1),
-				tostring(map.line2),
-				tostring(map.line3),
-				tostring(map.line4),
-				tostring(map.line5)
-			)
+			hs.printf("elementMap[%d]: bg=%s rows=%d", winId, tostring(map.bg), #rows)
 		end
 
 		self._buttonFrames[i] = {
@@ -1153,53 +1155,19 @@ function obj:_renderFullSidebar(sb, winData, structureSnap)
 	self._pendingSidebarFrame = nil
 end
 
-function obj:_renderInPlace(winData, sb)
+function obj:_renderInPlace(winData, sb, btnH)
 	self._buttonFrames = {}
-	local btnH = btnHeight(cfg.defaultFontSize)
 	local y = 6
 	for i, wd in ipairs(winData) do
 		local winId = wd.winId
 		local map = self._elementMap[winId]
 		if map then
 			self.sidebarCanvas:elementAttribute(map.bg, "fillColor", color(wd.btnColor))
-			self.sidebarCanvas:elementAttribute(map.line1, "text", wd.label)
-			if map.line2 then
-				local baseText = wd.basename or ""
-				self.sidebarCanvas:elementAttribute(map.line2, "text", baseText)
-			end
-			if map.line3 then
-				local l3 = line3Display(wd)
-				self.sidebarCanvas:elementAttribute(map.line3, "text", l3 and l3.text or "")
-			end
-			if map.line4 then
-				local ocText = ""
-				if wd.ocData then
-					local modelStr = shortModelName(wd.ocData.modelID) or ""
-					local agentStr = wd.ocData.agent or ""
-					local tokStr = ""
-					if wd.ocData.tokensIn and wd.ocData.tokensIn > 0 then
-						tokStr = fmtTokens(wd.ocData.tokensIn) .. " in"
-						if wd.ocData.tokensOut and wd.ocData.tokensOut > 0 then
-							tokStr = tokStr .. " · " .. fmtTokens(wd.ocData.tokensOut) .. " out"
-						end
-					end
-					local segments = {}
-					if modelStr ~= "" then
-						table.insert(segments, modelStr)
-					end
-					if agentStr ~= "" then
-						table.insert(segments, agentStr)
-					end
-					if tokStr ~= "" then
-						table.insert(segments, tokStr)
-					end
-					ocText = table.concat(segments, "  ")
+			for ri, row in ipairs(wd.textRows) do
+				local elemIdx = map.rows[ri]
+				if elemIdx then
+					self.sidebarCanvas:elementAttribute(elemIdx, "text", row.text)
 				end
-				self.sidebarCanvas:elementAttribute(map.line4, "text", ocText)
-			end
-			if map.line5 then
-				local ccText = ""
-				self.sidebarCanvas:elementAttribute(map.line5, "text", ccText)
 			end
 		end
 
@@ -1253,13 +1221,14 @@ function obj:_doBuildSidebar()
 	local needsFullRebuild = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
 
 	local orderedWins = self:_orderedWindows(wins)
-	local winData, needsAnyWindowRebuild = self:_gatherWindowData(orderedWins)
+	local winData, needsAnyWindowRebuild, maxNumRows = self:_gatherWindowData(orderedWins)
+	local btnH = computeBtnHeight(maxNumRows, cfg.defaultFontSize)
 
 	local ok, err = pcall(function()
 		if needsFullRebuild then
-			self:_renderFullSidebar(sb, winData, structureSnap)
+			self:_renderFullSidebar(sb, winData, structureSnap, btnH)
 		elseif needsAnyWindowRebuild then
-			self:_renderInPlace(winData, sb)
+			self:_renderInPlace(winData, sb, btnH)
 		end
 	end)
 
