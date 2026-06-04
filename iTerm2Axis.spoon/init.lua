@@ -58,6 +58,12 @@ obj.config = {
 }
 local cfg = obj.config
 
+local ACTION_LABELS = {
+	toggle = "Show/Hide Sidebar",
+	swapSide = "Swap Side",
+	refresh = "Refresh Layout",
+}
+
 -- ─────────────────────────────────────────────
 -- Helpers
 -- ─────────────────────────────────────────────
@@ -1187,6 +1193,14 @@ function obj:_doBuildSidebar()
 		end
 	end
 	self._skipTileOnThisBuild = false
+	if self._swapInProgress then
+		self._swapInProgress = false
+		hs.alert.show(ACTION_LABELS.swapSide .. " Completed")
+	end
+	if self._refreshInProgress then
+		self._refreshInProgress = false
+		hs.alert.show(ACTION_LABELS.refresh .. " Completed")
+	end
 end
 
 -- ─────────────────────────────────────────────
@@ -1238,6 +1252,7 @@ function obj:toggleSidebar()
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
 		end)
+		hs.alert.show(ACTION_LABELS.toggle .. " Completed")
 	else
 		local wins = getITermWindows()
 		if #wins > 0 and self.sidebarCanvas then
@@ -1258,10 +1273,12 @@ function obj:toggleSidebar()
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
 		end)
+		hs.alert.show(ACTION_LABELS.toggle .. " Completed")
 	end
 end
 
 function obj:toggleSide()
+	self._swapInProgress = true
 	self.config.sidebarSide = (self.config.sidebarSide ~= "right") and "right" or "left"
 	self._pendingSidebarFrame = nil
 	self._lastStructureSnapshot = nil
@@ -1576,56 +1593,56 @@ function obj:showWindowMenu(windowId)
 	local items = {
 		{
 			label = "Rename",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7E",
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.renameWindow or "⌘⇧E",
 			action = function()
 				self:renameWindow(windowId)
 			end,
 		},
 		{
 			label = "Move Up",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x91",
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.moveUp or "⌘⇧↑",
 			action = function()
 				self:moveWindowById(windowId, -1)
 			end,
 		},
 		{
 			label = "Move Down",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x86\x93",
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.moveDown or "⌘⇧↓",
 			action = function()
 				self:moveWindowById(windowId, 1)
 			end,
 		},
 		{
 			label = "Move to Top",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x8C\xA5\xE2\x86\x91",
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.moveToTop or "⌘⇧⌥↑",
 			action = function()
 				self:moveWindowToExtent(windowId, "top")
 			end,
 		},
 		{
 			label = "Move to Bottom",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7\xE2\x8C\xA5\xE2\x86\x93",
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.moveToBottom or "⌘⇧⌥↓",
 			action = function()
 				self:moveWindowToExtent(windowId, "bottom")
 			end,
 		},
 		{
-			label = "Refresh Layout",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7R",
+			label = ACTION_LABELS.refresh,
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.refresh or "⌘⇧R",
 			action = function()
 				self:refreshLayout()
 			end,
 		},
 		{
-			label = "Show/Hide Axis",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7B",
+			label = ACTION_LABELS.toggle,
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.toggle or "⌘⇧B",
 			action = function()
 				self:toggleSidebar()
 			end,
 		},
 		{
-			label = "Swap Side",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7S",
+			label = ACTION_LABELS.swapSide,
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.swapSide or "⌘⇧S",
 			action = function()
 				self:toggleSide()
 			end,
@@ -1791,22 +1808,22 @@ function obj:showGlobalMenu()
 
 	local items = {
 		{
-			label = "Refresh Layout",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7R",
+			label = ACTION_LABELS.refresh,
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.refresh or "⌘⇧R",
 			action = function()
 				self:refreshLayout()
 			end,
 		},
 		{
-			label = "Show/Hide Axis",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7B",
+			label = ACTION_LABELS.toggle,
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.toggle or "⌘⇧B",
 			action = function()
 				self:toggleSidebar()
 			end,
 		},
 		{
-			label = "Swap Side",
-			shortcut = "\xE2\x8C\x98\xE2\x87\xA7S",
+			label = ACTION_LABELS.swapSide,
+			shortcut = self._hotkeyLabels and self._hotkeyLabels.swapSide or "⌘⇧S",
 			action = function()
 				self:toggleSide()
 			end,
@@ -2700,6 +2717,9 @@ function obj:init()
 	self._appWatcher = nil
 	self._sidebarVisible = false
 	self._sidebarEnabled = true
+	self._hotkeyLabels = {}
+	self._swapInProgress = false
+	self._refreshInProgress = false
 	self._toggleLock = false
 	self._windowWatchers = {}
 	self._menuCanvas = nil
