@@ -17,6 +17,8 @@ obj.homepage = "https://github.com/Jeshii/iterm2axis"
 
 local SETTINGS_KEY_ORDER = "iTerm2Axis.orderedWindowIds"
 local SETTINGS_KEY_NAMES_BY_PATH = "iTerm2Axis.customNamesByPath"
+local ITERM_BID = "com.googlecode.iterm2"
+local HAMMERSPOON_BID = "org.hammerspoon.Hammerspoon"
 
 obj.config = {
 	debug = false,
@@ -58,6 +60,22 @@ obj.config = {
 -- Helpers
 -- ─────────────────────────────────────────────
 
+local function loadVersion()
+    local scriptPath = hs.spoons.scriptPath()
+    if scriptPath then
+        local versionPath = scriptPath:gsub("init%.lua$", "VERSION")
+        local f = io.open(versionPath, "r")
+        if f then
+            local v = f:read("*l")
+            f:close()
+            if v and v ~= "" then
+                obj.version = v
+            end
+        end
+    end
+end
+loadVersion()
+
 local function isITerm(win)
 	if not win then
 		return false
@@ -74,7 +92,7 @@ local function isITerm(win)
 	if not ok2 or not bid then
 		return false
 	end
-	return bid == "com.googlecode.iterm2"
+	return bid == ITERM_BID
 end
 
 local _iTermWindowsCache = nil
@@ -1469,7 +1487,7 @@ function obj:bringWindowToFront(windowId)
 	end
 
 	local ok = pcall(function()
-		local app = hs.application.get("com.googlecode.iterm2")
+		local app = win:application()
 		if app then
 			app:activate()
 		end
@@ -1497,7 +1515,7 @@ function obj:syncCanvasLevel()
 	-- ^ resets ordering to bottom of normal level
 
 	local frontApp = hs.application.frontmostApplication()
-	if frontApp and frontApp:bundleID() == "com.googlecode.iterm2" then
+	if frontApp and frontApp:bundleID() == ITERM_BID then
 		self.sidebarCanvas:orderAbove(nil)
 		-- ^ brings canvas to front of normal level, above iTerm windows
 	end
@@ -1515,11 +1533,11 @@ local function isSidebarClickAllowed()
 		return false
 	end
 	local bid = front:bundleID()
-	return bid == "com.googlecode.iterm2" or bid == "org.hammerspoon.Hammerspoon"
+	return bid == ITERM_BID or bid == HAMMERSPOON_BID
 end
 
 function obj:handleSidebarClick(x, y, rightClick)
-	local app = hs.application.get("com.googlecode.iterm2")
+	local app = hs.application.get(ITERM_BID)
 	if app then
 		app:activate()
 	end
@@ -2342,7 +2360,7 @@ function obj:bindHotkeys(mapping)
 	end)
 
 	hs.hotkey.bind(newWinMods, newWinKey, function()
-		local iterm = hs.application.get("com.googlecode.iterm2")
+		local iterm = hs.application.get(ITERM_BID)
 		if iterm then
 			iterm:activate()
 			hs.timer.doAfter(0.15, function()
@@ -2353,7 +2371,7 @@ function obj:bindHotkeys(mapping)
 				end)
 			end)
 		else
-			hs.application.open("com.googlecode.iterm2")
+			hs.application.open(ITERM_BID)
 			hs.timer.doAfter(1.0, function()
 				self._lastStructureSnapshot = nil
 				self:buildSidebar()
@@ -2403,19 +2421,6 @@ function obj:bindHotkeys(mapping)
 		self:focusNextWindow(1)
 	end)
 
-	hs.hotkey.bind({ "cmd", "shift", "ctrl" }, "D", function()
-		local all = hs.window.allWindows()
-		for _, w in ipairs(all) do
-			local app = w:application()
-			if app and app:bundleID() == "com.googlecode.iterm2" then
-				hs.printf("iTerm win %d: title=%q isStandard=%s", w:id(), w:title() or "", tostring(w:isStandard()))
-			end
-		end
-		hs.printf("opencode dirs:")
-		for dir, _ in pairs(obj._opencodeData or {}) do
-			hs.printf("  %q", dir)
-		end
-	end)
 end
 
 -- ─────────────────────────────────────────────
@@ -2442,6 +2447,9 @@ function obj:_setupSidebarClickTap()
 		end
 		local mouse = e:location()
 		if rectContains(sf, mouse.x, mouse.y) then
+			 if not isSidebarClickAllowed() then
+				return false
+			end
 			local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
 			self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, isRight)
 			return false
@@ -2484,6 +2492,10 @@ function obj:_setupDragTap()
 		local mouse = e:location()
 
 		if rectContains(sf, mouse.x, mouse.y) then
+			if not isSidebarClickAllowed() then
+				return false
+			end
+			
 			self._dragActive = true
 			local lx = mouse.x - sf.x
 			local ly = mouse.y - sf.y
@@ -2635,7 +2647,7 @@ function obj:_setupAppWatcher()
 	self._appWatcher = hs.application.watcher.new(function(appName, event, appObj)
 		if event == hs.application.watcher.deactivated then
 			local bid = appObj and appObj:bundleID()
-			if bid == "com.googlecode.iterm2" then
+			if bid == ITERM_BID then
 				if self._renameMode then
 					self:cancelRenameMode()
 				end
@@ -2643,7 +2655,7 @@ function obj:_setupAppWatcher()
 			end
 		elseif event == hs.application.watcher.activated then
 			local bid = appObj and appObj:bundleID()
-			if bid == "com.googlecode.iterm2" and self._sidebarVisible then
+			if bid == ITERM_BID and self._sidebarVisible then
 				self:syncCanvasLevel()
 			end
 		end

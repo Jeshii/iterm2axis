@@ -40,5 +40,12 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: iTerm2Axis.spoon-${{ steps.version.outputs.value }}
+          name: iTerm2Axis.spoon-dev
           path: iTerm2Axis.spoon.zip
+          overwrite: true
+
+      - name: Write version to VERSION file
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
+          VERSION="${VERSION#v}"         # strip 'v' prefix if present
+          echo "${VERSION}" > iTerm2Axis.spoon/VERSION
