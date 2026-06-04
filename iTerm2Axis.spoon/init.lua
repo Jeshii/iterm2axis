@@ -57,6 +57,26 @@ obj.config = {
 }
 local cfg = obj.config
 
+local MOD_SYMBOLS = {
+	cmd = "⌘",
+	shift = "⇧",
+	alt = "⌥",
+	ctrl = "⌃",
+}
+
+local KEY_SYMBOLS = {
+	up = "\xe2\x86\x91",
+	down = "\xe2\x86\x93",
+}
+
+local function formatHotkeyLabel(mods, key)
+	local result = ""
+	for _, m in ipairs(mods) do
+		result = result .. (MOD_SYMBOLS[m:lower()] or m)
+	end
+	return result .. (KEY_SYMBOLS[key:lower()] or key:upper())
+end
+
 local ACTION_LABELS = {
 	toggle = "Show/Hide Sidebar",
 	swapSide = "Swap Side",
@@ -1431,49 +1451,49 @@ function obj:showWindowMenu(windowId)
 	local items = {
 		{
 			label = "Move Up",
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.moveUp or "⌘⇧↑",
+			shortcut = self._hotkeyLabels.moveUp,
 			action = function()
 				self:moveWindowById(windowId, -1)
 			end,
 		},
 		{
 			label = "Move Down",
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.moveDown or "⌘⇧↓",
+			shortcut = self._hotkeyLabels.moveDown,
 			action = function()
 				self:moveWindowById(windowId, 1)
 			end,
 		},
 		{
 			label = "Move to Top",
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.moveToTop or "⌘⇧⌥↑",
+			shortcut = self._hotkeyLabels.moveToTop,
 			action = function()
 				self:moveWindowToExtent(windowId, "top")
 			end,
 		},
 		{
 			label = "Move to Bottom",
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.moveToBottom or "⌘⇧⌥↓",
+			shortcut = self._hotkeyLabels.moveToBottom,
 			action = function()
 				self:moveWindowToExtent(windowId, "bottom")
 			end,
 		},
 		{
 			label = ACTION_LABELS.refresh,
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.refresh or "⌘⇧R",
+			shortcut = self._hotkeyLabels.refresh,
 			action = function()
 				self:refreshLayout()
 			end,
 		},
 		{
 			label = ACTION_LABELS.toggle,
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.toggle or "⌘⇧B",
+			shortcut = self._hotkeyLabels.toggle,
 			action = function()
 				self:toggleSidebar()
 			end,
 		},
 		{
 			label = ACTION_LABELS.swapSide,
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.swapSide or "⌘⇧S",
+			shortcut = self._hotkeyLabels.swapSide,
 			action = function()
 				self:toggleSide()
 			end,
@@ -1640,21 +1660,21 @@ function obj:showGlobalMenu()
 	local items = {
 		{
 			label = ACTION_LABELS.refresh,
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.refresh or "⌘⇧R",
+			shortcut = self._hotkeyLabels.refresh,
 			action = function()
 				self:refreshLayout()
 			end,
 		},
 		{
 			label = ACTION_LABELS.toggle,
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.toggle or "⌘⇧B",
+			shortcut = self._hotkeyLabels.toggle,
 			action = function()
 				self:toggleSidebar()
 			end,
 		},
 		{
 			label = ACTION_LABELS.swapSide,
-			shortcut = self._hotkeyLabels and self._hotkeyLabels.swapSide or "⌘⇧S",
+			shortcut = self._hotkeyLabels.swapSide,
 			action = function()
 				self:toggleSide()
 			end,
@@ -1994,6 +2014,14 @@ function obj:bindHotkeys(mapping)
 	local focusUpMods, focusUpKey = table.unpack(map.focusUp or { { "alt", "cmd" }, "up" })
 	local focusDownMods, focusDownKey = table.unpack(map.focusDown or { { "alt", "cmd" }, "down" })
 	local swapSideMods, swapSideKey = table.unpack(map.swapSide or { { "cmd", "shift" }, "S" })
+
+	self._hotkeyLabels.toggle = formatHotkeyLabel(toggleMods, toggleKey)
+	self._hotkeyLabels.refresh = formatHotkeyLabel(refreshMods, refreshKey)
+	self._hotkeyLabels.moveUp = formatHotkeyLabel(moveUpMods, moveUpKey)
+	self._hotkeyLabels.moveDown = formatHotkeyLabel(moveDownMods, moveDownKey)
+	self._hotkeyLabels.moveToTop = formatHotkeyLabel(moveTopMods, moveTopKey)
+	self._hotkeyLabels.moveToBottom = formatHotkeyLabel(moveBottomMods, moveBottomKey)
+	self._hotkeyLabels.swapSide = formatHotkeyLabel(swapSideMods, swapSideKey)
 
 	hs.hotkey.bind(toggleMods, toggleKey, function()
 		self:toggleSidebar()
