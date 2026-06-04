@@ -222,22 +222,24 @@ local _gitWsNameCache = {} -- [windowId] = worktree leaf name string or false
 -- Per-window working directory cache, keyed by windowId.
 -- Invalidated on windowTitleChanged (which fires when PWD changes with shell integration).
 local _wdCache = {} -- [windowId] = path string or false
-local _wdFlight = {} -- [windowId] = true (fetch in flight)
+local _tabInfoCache = {} -- [windowId] = { tabCount, focusedIdx, tabName }
+local _tabInfoPending = {} -- [windowId] = true (fetch in flight)
+local _hostnameCache = {} -- [windowId] = hostname string or false
 
-local function getWindowWorkingDir(win)
+local function _fetchWindowInfo(win)
 	if not win then
 		return nil
 	end
 	local winId = win:id()
 
-	if _wdCache[winId] ~= nil then
-		return _wdCache[winId] or nil
+	if _tabInfoCache[winId] ~= nil and _wdCache[winId] ~= nil then
+		return _tabInfoCache[winId]
 	end
 
-	if _wdFlight[winId] then
-		return _wdCache[winId] or nil
+	if _tabInfoPending[winId] then
+		return _tabInfoCache[winId] or nil
 	end
-	_wdFlight[winId] = true
+	_tabInfoPending[winId] = true
 
 	-- Match by window title instead of CGWindowID, since iTerm2's AppleScript
 	-- window ID differs from Hammerspoon's CGWindowID.
@@ -249,9 +251,22 @@ local function getWindowWorkingDir(win)
         tell application "iTerm2"
             try
                 tell (first window whose name = "%s")
-                    tell current session
-                        return variable named "session.path"
-                    end tell
+                    set RS to ASCII character 30
+                    set tabCount to count of tabs
+                    set currentSessionId to id of current session
+                    repeat with i from 1 to tabCount
+                        tell tab i
+                            if id of current session is currentSessionId then
+                                set tabTitle to title
+                                tell current session
+                                    set sessionPath to variable named "session.path"
+                                    set sessionHost to variable named "session.hostname"
+                                end tell
+                                return (tabCount as text) & RS & (i as text) & RS & tabTitle & RS & sessionPath & RS & sessionHost
+                            end if
+                        end tell
+                    end repeat
+                    return ""
                 end tell
             on error
                 return ""
@@ -263,16 +278,34 @@ local function getWindowWorkingDir(win)
 
 	hs.task
 		.new("/usr/bin/osascript", function(exitCode, stdout, stderr)
-			_wdFlight[winId] = nil
-			local path = stdout and stdout:gsub("%s+$", "")
+			_tabInfoPending[winId] = nil
+			local tabInfo, path, hostname
+
+			if stdout and stdout ~= "" then
+				local tabCount, focusedIdx, tabName, tPath, tHost =
+					stdout:match("^([^\x1e]+)\x1e([^\x1e]+)\x1e([^\x1e]+)\x1e([^\x1e]*)\x1e([^\x1e]*)$")
+				if tabCount then
+					tabInfo = {
+						tabCount = tonumber(tabCount),
+						focusedIdx = tonumber(focusedIdx),
+						tabName = tabName,
+					}
+					_tabInfoCache[winId] = tabInfo
+					path = tPath
+					hostname = tHost
+				end
+			end
+
 			_wdCache[winId] = (path and path ~= "") and path or false
+			_hostnameCache[winId] = (hostname and hostname ~= "") and hostname or false
+
 			if obj.sidebarCanvas and obj._sidebarEnabled then
 				obj:buildSidebar()
 			end
 		end, { "-e", script })
 		:start()
 
-	return _wdCache[winId] or nil
+	return _tabInfoCache[winId] or nil
 end
 
 local function getGitBranchForPath(path, winId)
@@ -504,7 +537,8 @@ local function getOpenPRForWindow(win)
 		return nil
 	end
 	local winId = win:id()
-	local fullPath = getWindowWorkingDir(win)
+	_fetchWindowInfo(win)
+	local fullPath = _wdCache[winId]
 	local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
 	if not branch then
 		_prCache[winId] = false
@@ -911,7 +945,8 @@ function obj:_gatherWindowData(orderedWins)
 		local isActive = (winId == self.activeWindowId)
 		local rawTitle = win:title() or ""
 		local parts = parseTitleComponents(rawTitle)
-		local fullPath = getWindowWorkingDir(win)
+		_fetchWindowInfo(win)
+		local fullPath = _wdCache[winId]
 		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
 		-- Prefer claude agents --json status over title heuristic.
 		-- Bell state is kept from title only (not in agents data).
@@ -1819,6 +1854,9 @@ function obj:handleWindowMoveOrResize()
 			for _, win in ipairs(wins) do
 				local id = win:id()
 				_wdCache[id] = nil
+				_tabInfoCache[id] = nil
+				_tabInfoPending[id] = nil
+				_hostnameCache[id] = nil
 				_gitBranchCache[id] = nil
 				_gitWsNameCache[id] = nil
 				_prCache[id] = nil
@@ -2116,7 +2154,9 @@ function obj:_setupWindowWatcher()
 			_prBranchCache[id] = nil
 			_prPending[id] = nil
 			_wdCache[id] = nil
-			_wdFlight[id] = nil
+			_tabInfoCache[id] = nil
+			_tabInfoPending[id] = nil
+			_hostnameCache[id] = nil
 			stopFlashing(id)
 		end
 		_iTermWindowsCache = nil
@@ -2144,6 +2184,9 @@ function obj:_setupWindowWatcher()
 			isBellStateChange = title:match("^🔔")
 			if not isCCStateChange and not isBellStateChange then
 				_wdCache[id] = nil
+				_tabInfoCache[id] = nil
+				_tabInfoPending[id] = nil
+				_hostnameCache[id] = nil
 				_gitBranchCache[id] = nil
 				_gitWsNameCache[id] = nil
 			end
@@ -2216,7 +2259,7 @@ end
 function obj:_restorePersistedState()
 	for _, win in ipairs(getITermWindows()) do
 		self:watchWindow(win)
-		getWindowWorkingDir(win)
+		_fetchWindowInfo(win)
 	end
 
 	local savedOrder = hs.settings.get(SETTINGS_KEY_ORDER)
@@ -2364,7 +2407,9 @@ function obj:stop()
 	_prBranchCache = {}
 	_prPending = {}
 	_wdCache = {}
-	_wdFlight = {}
+	_tabInfoCache = {}
+	_tabInfoPending = {}
+	_hostnameCache = {}
 	if _sharedFlashTimer then
 		_sharedFlashTimer:stop()
 		_sharedFlashTimer = nil
@@ -2432,7 +2477,9 @@ function obj:init()
 	_prBranchCache = {}
 	_prPending = {}
 	_wdCache = {}
-	_wdFlight = {}
+	_tabInfoCache = {}
+	_tabInfoPending = {}
+	_hostnameCache = {}
 	_sharedFlashTimer = nil
 	_flashingWindows = {}
 	_flashState = {}
