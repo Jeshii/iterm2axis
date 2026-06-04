@@ -2580,7 +2580,7 @@ function obj:start()
 		self:startClaudeAgentsPolling()
 	end
 
-	hs.alert.show("iTerm2 Axis loaded ✓", 1.5)
+	hs.alert.show("iTerm2Axis loaded ✓", 1.5)
 	return self
 end
 
