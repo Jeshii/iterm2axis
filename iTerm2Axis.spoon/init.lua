@@ -253,20 +253,22 @@ local function _fetchWindowInfo(win)
                 tell (first window whose name = "%s")
                     set RS to ASCII character 30
                     set tabCount to count of tabs
-                    set currentSessionId to id of current session
+                    set tabName to ""
+                    set focusedIdx to 0
+                    try
+                        set tabName to title of current tab
+                    end try
                     repeat with i from 1 to tabCount
-                        tell tab i
-                            if id of current session is currentSessionId then
-                                set tabTitle to title
-                                tell current session
-                                    set sessionPath to variable named "session.path"
-                                    set sessionHost to variable named "session.hostname"
-                                end tell
-                                return (tabCount as text) & RS & (i as text) & RS & tabTitle & RS & sessionPath & RS & sessionHost
-                            end if
-                        end tell
+                        if title of tab i is tabName then
+                            set focusedIdx to i
+                            exit repeat
+                        end if
                     end repeat
-                    return ""
+                    tell current session
+                        set sessionPath to variable named "session.path"
+                        set sessionHost to variable named "session.hostname"
+                    end tell
+                    return (tabCount as text) & RS & (focusedIdx as text) & RS & tabName & RS & sessionPath & RS & sessionHost
                 end tell
             on error
                 return ""
@@ -279,23 +281,25 @@ local function _fetchWindowInfo(win)
 	hs.task
 		.new("/usr/bin/osascript", function(exitCode, stdout, stderr)
 			_tabInfoPending[winId] = nil
-			local tabInfo, path, hostname
+			local path, hostname
 
 			if stdout and stdout ~= "" then
 				local tabCount, focusedIdx, tabName, tPath, tHost =
 					stdout:match("^([^\x1e]+)\x1e([^\x1e]+)\x1e([^\x1e]+)\x1e([^\x1e]*)\x1e([^\x1e]*)$")
 				if tabCount then
-					tabInfo = {
+					_tabInfoCache[winId] = {
 						tabCount = tonumber(tabCount),
 						focusedIdx = tonumber(focusedIdx),
 						tabName = tabName,
 					}
-					_tabInfoCache[winId] = tabInfo
 					path = tPath
 					hostname = tHost
 				end
 			end
 
+			if not _tabInfoCache[winId] then
+				_tabInfoCache[winId] = false
+			end
 			_wdCache[winId] = (path and path ~= "") and path or false
 			_hostnameCache[winId] = (hostname and hostname ~= "") and hostname or false
 
@@ -786,11 +790,20 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData)
 		local id = win:id()
 		local fullPath = _wdCache[id] or ""
 		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
+		local ti = _tabInfoCache[id]
+		local tabInfoStr = ti
+				and table.concat({
+					tostring(ti.tabCount),
+					tostring(ti.focusedIdx),
+					ti.tabName or "",
+				}, ":")
+			or ""
 		table.insert(
 			parts,
 			table.concat({
 				tostring(id),
 				win:title() or "",
+				tabInfoStr,
 				tostring(id == activeId),
 				tostring(_flashState[id] or false),
 				tostring(claudeState(win) or ""),
@@ -832,6 +845,20 @@ local function line3Display(wd)
 	return nil
 end
 
+local function makeTabLabel(tabInfo)
+	if not tabInfo or not tabInfo.tabName or tabInfo.tabName == "" then
+		return nil
+	end
+	local tabCount = math.max(tabInfo.tabCount or 1, 1)
+	local focusedIdx = math.max(tabInfo.focusedIdx or 1, 1)
+	if focusedIdx > tabCount then
+		focusedIdx = tabCount
+	end
+	local before = string.rep("・", focusedIdx - 1)
+	local after = string.rep("・", tabCount - focusedIdx)
+	return before .. tabInfo.tabName .. after
+end
+
 local HEADER_COLOR = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 }
 local DETAIL_COLOR = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 }
 
@@ -839,6 +866,9 @@ local function buildTextRows(wd)
 	local dfs = cfg.defaultFontSize
 	local rows = {}
 	table.insert(rows, { text = wd.label, fs = dfs + 1, color = cfg.textColor })
+	if wd.hostname and wd.hostname ~= wd.label then
+		table.insert(rows, { text = wd.hostname, fs = dfs, color = DETAIL_COLOR })
+	end
 	if wd.basename then
 		table.insert(rows, { text = wd.basename, fs = dfs, color = DETAIL_COLOR })
 	end
@@ -983,9 +1013,15 @@ function obj:_gatherWindowData(orderedWins)
 		local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
 		local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
 		local wsName = _gitWsNameCache[winId] or nil
-		local label = parts.host or basename or ("Window " .. i)
+		local hostname = _hostnameCache[winId] or parts.host
+		local tabInfo = _tabInfoCache[winId]
+		local tabName = tabInfo and tabInfo.tabName
+		local dottedLabel = tabInfo and makeTabLabel(tabInfo)
+		local label = dottedLabel or basename or hostname or ("Window " .. i)
 
-		if basename and basename == label then
+		if tabName and basename and basename == tabName then
+			basename = nil
+		elseif not tabName and basename and basename == label then
 			basename = nil
 		end
 
@@ -1005,6 +1041,7 @@ function obj:_gatherWindowData(orderedWins)
 			winId = winId,
 			btnColor = btnColor,
 			label = label,
+			hostname = hostname,
 			basename = basename,
 			branch = branch,
 			wsName = wsName,
@@ -1013,7 +1050,7 @@ function obj:_gatherWindowData(orderedWins)
 			claudeAgent = claudeAgent,
 			textRows = buildTextRows({
 				label = label,
-				basename = basename,
+				hostname = hostname,
 				branch = branch,
 				wsName = wsName,
 				prFromTitle = prFromTitle,
@@ -2221,6 +2258,11 @@ function obj:_setupWindowWatcher()
 					self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
 				end
 			end
+			-- Refresh tab info on focus to catch tab switches that don't fire titleChanged
+			_tabInfoCache[winId] = nil
+			_tabInfoPending[winId] = nil
+			_hostnameCache[winId] = nil
+			_fetchWindowInfo(win)
 			hs.timer.doAfter(0.05, function()
 				self:syncCanvasLevel()
 			end)
