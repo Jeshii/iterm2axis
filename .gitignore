@@ -40,3 +40,6 @@ luac.out
 *.hex
 
 .vscode/*
+CODEREVIEW.md
+PLAN.md
+.luarc.json

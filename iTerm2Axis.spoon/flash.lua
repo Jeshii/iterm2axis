@@ -1,0 +1,101 @@
+_sharedFlashTimer = nil
+_currentFlashInterval = nil
+_flashingWindows = {}
+_flashState = {}
+_flashNormalColor = {}
+_flashType = {}
+
+function claudeState(win)
+	local title = win:title() or ""
+	local stripped = title:gsub("^🔔", "")
+	if stripped:match("^✳") then
+		return "waiting"
+	end
+	if stripped:match("^·") then
+		return "busy"
+	end
+	if title:match("^🔔") then
+		return "bell"
+	end
+	return nil
+end
+
+function flashIntervalForType(flashType)
+	return (flashType == "bell") and CFG.bell.flashInterval or CFG.claudecode.flashInterval
+end
+
+function minActiveFlashInterval()
+	local minInterval = math.huge
+	for wid in pairs(_flashingWindows) do
+		local ft = _flashType[wid] or "waiting"
+		local interval = flashIntervalForType(ft)
+		if interval < minInterval then
+			minInterval = interval
+		end
+	end
+	return minInterval
+end
+
+function _adjustFlashTimer()
+	if not next(_flashingWindows) then
+		if _sharedFlashTimer then
+			_sharedFlashTimer:stop()
+			_sharedFlashTimer = nil
+			_currentFlashInterval = nil
+			_currentFlashInterval = nil
+		end
+		return
+	end
+
+	local newInterval = minActiveFlashInterval()
+	if not _sharedFlashTimer or newInterval ~= _currentFlashInterval then
+		if _sharedFlashTimer then
+			_sharedFlashTimer:stop()
+		end
+		_currentFlashInterval = newInterval
+		_sharedFlashTimer = hs.timer.new(newInterval, function()
+			for wid in pairs(_flashingWindows) do
+				_flashState[wid] = not _flashState[wid]
+				local bgIdx = OBJ._btnBgElements[wid]
+				if bgIdx and OBJ.sidebarCanvas and OBJ.sidebarCanvas:isShowing() then
+					local normalCol = _flashNormalColor[wid]
+					local flashColor = (_flashType[wid] == "bell") and CFG.bell.flashColor or CFG.waitingFlashColor
+					local newColor = _flashState[wid] and flashColor
+						or (normalCol and color(normalCol) or color(CFG.buttonColor))
+					OBJ.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
+				end
+			end
+		end)
+		_sharedFlashTimer:start()
+	end
+end
+
+function startFlashing(winId, flashType)
+	if _flashingWindows[winId] then
+		return
+	end
+	flashType = flashType or "waiting"
+	_flashType[winId] = flashType
+	_flashState[winId] = true
+	local isActive = (winId == OBJ.activeWindowId)
+	_flashNormalColor[winId] = isActive and CFG.activeButtonColor or CFG.buttonColor
+	_flashingWindows[winId] = true
+	_adjustFlashTimer()
+end
+
+function stopFlashing(winId)
+	_flashingWindows[winId] = nil
+	_flashState[winId] = nil
+	_flashType[winId] = nil
+	local normalColor = _flashNormalColor[winId]
+	_flashNormalColor[winId] = nil
+
+	if normalColor and OBJ.sidebarCanvas and OBJ.sidebarCanvas:isShowing() then
+		local bgIdx = OBJ._btnBgElements[winId]
+		if bgIdx then
+			OBJ.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(normalColor))
+		end
+	end
+
+	_adjustFlashTimer()
+end

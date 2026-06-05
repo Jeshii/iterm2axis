@@ -36,7 +36,7 @@ A Hammerspoon window manager that provides a sidebar (configurable left or right
 - All edits go into the repo's `iTerm2Axis.spoon/init.lua`. The user handles deployment
 - Don't rush. Phase the changes between breaking changes and ask user to reload the Hammerspoon config between changes to confirm behavior
 - When debugging, ask the user to check Hammerspoon's Console (menu bar icon → Console) or run `/Applications/Hammerspoon.app/Contents/MacOS/Hammerspoon` from a terminal to see errors
-- Run `stylua` on any lua files you edit
+- Run `stylua` and `lua-language-server` on any lua files you edit
 - Don't write monolithic, hard to read functions
 - If functionality already exists in iTerm2, don't try to recreate it
 - Do not push changes to the remote without asking first
