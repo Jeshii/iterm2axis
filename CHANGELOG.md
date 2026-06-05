@@ -2,6 +2,8 @@
 
 - **Phase 1 (Change 1): Fixed `_hotkeyLabels` dead state** — added `formatHotkeyLabel()` helper with `MOD_SYMBOLS`/`KEY_SYMBOLS` lookup tables that convert modifier/key arrays to display strings (e.g. `{"cmd","shift"},"S"` → `"⌘⇧S"`). `bindHotkeys()` now populates `self._hotkeyLabels` from the binding parameters, so user-customized hotkeys automatically update context menu shortcuts. Removed the dead `self._hotkeyLabels and self._hotkeyLabels.xxx or "fallback"` pattern from `showWindowMenu`/`showGlobalMenu`.
 
+- **Phase 1 (Change 2): Replaced inline menu teardown with `self:_closeMenus()`** — `showWindowMenu` and `showGlobalMenu` each had an identical 8-line inline block duplicating `_closeMenus()`. Replaced both with a single `self:_closeMenus()` call.
+
 ## 2026-06-04
 
 - **Phase 4: Tab-name buttons with `・` dot indicators**: label now shows the iTerm2 tab name (from `_tabInfoCache`) wrapped in `・` dots indicating tab count and focused position (e.g. `・tabname・`). `makeTabLabel()` helper safely handles missing/falsy tab info, unknown focused index (falls back to position 1), and edge cases. Basename suppression compares against plain `tabName` instead of the dotted label. When tab info is unavailable (async miss), falls back to `basename or hostname or "Window N"` with no dots.

@@ -1434,19 +1434,7 @@ function obj:handleSidebarClick(x, y, rightClick)
 end
 
 function obj:showWindowMenu(windowId)
-	-- Close any existing menu
-	if self._menuCanvas then
-		self._menuCanvas:delete()
-		self._menuCanvas = nil
-	end
-	if self._menuEventTap then
-		self._menuEventTap:stop()
-		self._menuEventTap = nil
-	end
-	if self._menuKeyTap then
-		self._menuKeyTap:stop()
-		self._menuKeyTap = nil
-	end
+	self:_closeMenus()
 
 	local items = {
 		{
@@ -1644,18 +1632,7 @@ function obj:_renderPopupMenu(items)
 end
 
 function obj:showGlobalMenu()
-	if self._menuCanvas then
-		self._menuCanvas:delete()
-		self._menuCanvas = nil
-	end
-	if self._menuEventTap then
-		self._menuEventTap:stop()
-		self._menuEventTap = nil
-	end
-	if self._menuKeyTap then
-		self._menuKeyTap:stop()
-		self._menuKeyTap = nil
-	end
+	self:_closeMenus()
 
 	local items = {
 		{
