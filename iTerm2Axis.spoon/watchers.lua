@@ -134,11 +134,10 @@ function OBJ:_rebuildAfterSettle(tileWhenHidden)
 end
 
 local function stableCore(t)
-	return (t or "")
-		:gsub("^[✳·%s]+", "")
-		:gsub("\226[\160-\163][\128-\191]", "")
-		:gsub("%s*[—–-]%s*%d+✕%d+%s*$", "")
-		:gsub("^%s*(.-)%s*$", "%1")
+    return (t or "")
+        :gsub("^[^\x20-\x7e/~]+", "")   -- strip any leading non-ASCII/non-path chars (spinners, bullets, etc.)
+        :gsub("%s*[—–-]%s*%d+✕%d+%s*$", "")
+        :gsub("^%s*(.-)%s*$", "%1")
 end
 
 function OBJ:_setupWindowWatcher()
@@ -228,6 +227,7 @@ function OBJ:_setupWindowWatcher()
 		if win and IS_ITERM(win) then
 			local winId = win:id()
 			self.activeWindowId = winId
+			CACHE.wc(winId).lastRawTitle = win:title() or ""
 			FLASH.stopFlashing(winId)
 			if self.sidebarCanvas and self._btnBgElements then
 				for wid, bgIdx in pairs(self._btnBgElements) do
