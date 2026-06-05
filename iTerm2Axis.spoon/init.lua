@@ -642,6 +642,28 @@ function obj:_finalizeOpenCodeData(newData)
 	end
 end
 
+local function normalizeOCSession(s)
+	if not s.directory then
+		return nil
+	end
+	local m = {}
+	if s.model then
+		local ok, parsed = pcall(hs.json.decode, s.model)
+		if ok and type(parsed) == "table" then
+			m = parsed
+		end
+	end
+	return {
+		title = s.title,
+		modelID = m.id,
+		provider = m.providerID,
+		agent = s.agent,
+		tokensIn = s.tokens_input or 0,
+		tokensOut = s.tokens_output or 0,
+		updated = s.time_updated or 0,
+	}
+end
+
 function obj:fetchOpenCodeData()
 	if self._opencodePending then
 		return
@@ -660,24 +682,12 @@ function obj:fetchOpenCodeData()
 					if ok and type(sessions) == "table" then
 						for _, s in ipairs(sessions) do
 							if s.directory then
-								local existing = newData[s.directory]
-								if not existing or (s.time_updated or 0) > existing.updated then
-									local m = {}
-									if s.model then
-										local ok2, parsed = pcall(hs.json.decode, s.model)
-										if ok2 and type(parsed) == "table" then
-											m = parsed
-										end
+								local record = normalizeOCSession(s)
+								if record then
+									local existing = newData[s.directory]
+									if not existing or (s.time_updated or 0) > existing.updated then
+										newData[s.directory] = record
 									end
-									newData[s.directory] = {
-										title = s.title,
-										modelID = m.id,
-										provider = m.providerID,
-										agent = s.agent,
-										tokensIn = s.tokens_input or 0,
-										tokensOut = s.tokens_output or 0,
-										updated = s.time_updated or 0,
-									}
 								end
 							end
 						end
@@ -705,22 +715,10 @@ function obj:fetchOpenCodeData()
 								if ok and type(sessions) == "table" then
 									for _, s in ipairs(sessions) do
 										if s.directory and not newData[s.directory] then
-											local m = {}
-											if s.model then
-												local ok2, parsed = pcall(hs.json.decode, s.model)
-												if ok2 and type(parsed) == "table" then
-													m = parsed
-												end
+											local record = normalizeOCSession(s)
+											if record then
+												newData[s.directory] = record
 											end
-											newData[s.directory] = {
-												title = s.title,
-												modelID = m.id,
-												provider = m.providerID,
-												agent = s.agent,
-												tokensIn = s.tokens_input or 0,
-												tokensOut = s.tokens_output or 0,
-												updated = s.time_updated or 0,
-											}
 										end
 									end
 								end
@@ -1019,6 +1017,22 @@ function obj:_orderedWindows(wins)
 	return itermWins
 end
 
+local function windowStatusColor(state, isActive, isDragHover, isFlashing, isFocused)
+	if isDragHover then
+		return cfg.dragHighlightColor
+	elseif state == "waiting" and isFlashing and not isFocused then
+		return cfg.waitingFlashColor
+	elseif state == "bell" and isFlashing and not isFocused then
+		return cfg.bell.flashColor
+	elseif state == "busy" then
+		return cfg.busyColor
+	elseif isActive then
+		return cfg.activeButtonColor
+	else
+		return cfg.buttonColor
+	end
+end
+
 function obj:_gatherWindowData(orderedWins)
 	local winData = {}
 	for i, win in ipairs(orderedWins) do
@@ -1039,24 +1053,11 @@ function obj:_gatherWindowData(orderedWins)
 				state = "busy"
 			end
 		end
-		local btnColor
 		local focusedWin = hs.window.focusedWindow()
 		local isFocused = focusedWin and focusedWin:id() == winId
 		local isDragHover = self._dragActive and (winId == self._lastDragHoverId)
+		local btnColor = windowStatusColor(state, isActive, isDragHover, _flashState[winId], isFocused)
 
-		if isDragHover then
-			btnColor = cfg.dragHighlightColor
-		elseif state == "waiting" and _flashState[winId] and not isFocused then
-			btnColor = cfg.waitingFlashColor
-		elseif state == "bell" and _flashState[winId] and not isFocused then
-			btnColor = cfg.bell.flashColor
-		elseif state == "busy" then
-			btnColor = cfg.busyColor
-		elseif isActive then
-			btnColor = cfg.activeButtonColor
-		else
-			btnColor = cfg.buttonColor
-		end
 		local prFromTitle = parsePRFromTitle(rawTitle)
 		if prFromTitle and prFromTitle <= 0 then
 			prFromTitle = nil
@@ -1242,7 +1243,7 @@ function obj:_doBuildSidebar()
 	local sb = self:layoutFrames(self:getScreen():frame(), self:getSidebarAnchor()).sidebar
 
 	local structureSnap = sidebarStructureSnapshot(wins, sb.w, sb.h)
-	local needsFullRebuild = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
+	local shouldShowAndTile = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
 
 	local orderedWins = self:_orderedWindows(wins)
 	local winData = self:_gatherWindowData(orderedWins)
@@ -1258,7 +1259,7 @@ function obj:_doBuildSidebar()
 
 	self._buildPending = false
 	self:syncCanvasLevel()
-	if needsFullRebuild and self._sidebarEnabled then
+	if shouldShowAndTile and self._sidebarEnabled then
 		self.sidebarCanvas:show()
 		self._sidebarVisible = true
 		if not self._skipTileOnThisBuild then
@@ -1691,18 +1692,20 @@ function obj:showGlobalMenu()
 	self:_renderPopupMenu(items)
 end
 
-function obj:moveWindowById(windowId, direction)
-	if not self._orderedWindowIds then
-		self._orderedWindowIds = {}
+local function _syncOrderedIds()
+	if not obj._orderedWindowIds then
+		obj._orderedWindowIds = {}
 	end
+
 	local wins = getITermWindows()
 	local liveIds = {}
 	for _, win in ipairs(wins) do
 		liveIds[win:id()] = true
 	end
+
 	local filtered = {}
 	local filteredSet = {}
-	for _, id in ipairs(self._orderedWindowIds) do
+	for _, id in ipairs(obj._orderedWindowIds) do
 		if liveIds[id] then
 			table.insert(filtered, id)
 			filteredSet[id] = true
@@ -1713,8 +1716,13 @@ function obj:moveWindowById(windowId, direction)
 			table.insert(filtered, win:id())
 		end
 	end
-	self._orderedWindowIds = filtered
-	if #self._orderedWindowIds < 2 then
+	obj._orderedWindowIds = filtered
+	return filtered
+end
+
+function obj:moveWindowById(windowId, direction)
+	local filtered = _syncOrderedIds()
+	if #filtered < 2 then
 		return
 	end
 
@@ -1743,29 +1751,8 @@ function obj:moveWindowById(windowId, direction)
 end
 
 function obj:moveWindowToExtent(windowId, extent)
-	if not self._orderedWindowIds then
-		self._orderedWindowIds = {}
-	end
-	local wins = getITermWindows()
-	local liveIds = {}
-	for _, win in ipairs(wins) do
-		liveIds[win:id()] = true
-	end
-	local filtered = {}
-	local filteredSet = {}
-	for _, id in ipairs(self._orderedWindowIds) do
-		if liveIds[id] then
-			table.insert(filtered, id)
-			filteredSet[id] = true
-		end
-	end
-	for _, win in ipairs(wins) do
-		if not filteredSet[win:id()] then
-			table.insert(filtered, win:id())
-		end
-	end
-	self._orderedWindowIds = filtered
-	if #self._orderedWindowIds < 2 then
+	local filtered = _syncOrderedIds()
+	if #filtered < 2 then
 		return
 	end
 
@@ -1799,36 +1786,7 @@ function obj:focusNextWindow(direction)
 		return
 	end
 
-	if not self._orderedWindowIds then
-		self._orderedWindowIds = {}
-	end
-	if #self._orderedWindowIds == 0 then
-		for _, win in ipairs(wins) do
-			table.insert(self._orderedWindowIds, win:id())
-		end
-	else
-		local liveIds = {}
-		for _, win in ipairs(wins) do
-			liveIds[win:id()] = true
-		end
-		local filtered = {}
-		for _, id in ipairs(self._orderedWindowIds) do
-			if liveIds[id] then
-				table.insert(filtered, id)
-			end
-		end
-		local filteredSet = {}
-		for _, id in ipairs(filtered) do
-			filteredSet[id] = true
-		end
-		for _, win in ipairs(wins) do
-			if not filteredSet[win:id()] then
-				table.insert(filtered, win:id())
-			end
-		end
-		self._orderedWindowIds = filtered
-	end
-
+	_syncOrderedIds()
 	if #self._orderedWindowIds == 0 then
 		return
 	end
