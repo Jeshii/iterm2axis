@@ -205,7 +205,7 @@ function OBJ:_gatherWindowData(orderedWins)
 		local isActive = (winId == self.activeWindowId)
 		local rawTitle = win:title() or ""
 		local parts = PARSE_TITLE_COMPONENTS(rawTitle)
-		_fetchWindowInfo(win)
+		FETCH_WINDOW_INFO(win)
 		local fullPath = CACHE.wc(winId).wd
 		local claudeAgent = fullPath and CACHE._claudeAgentsData[fullPath]
 		local state = FLASH.claudeState(win)

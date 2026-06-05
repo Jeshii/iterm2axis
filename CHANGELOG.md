@@ -1,5 +1,11 @@
 ## 2026-06-05
 
+- **Attempts to fix sidebar button flickering during Claude Code thinking** — Claude resets the terminal title to its base form between prefix transitions (`✳ /path` → `/path` → `· /path`). This triggered two bugs in `windowTitleChanged`:
+  1. The intermediate `/path` lacks a CC prefix, so the handler treated it as a real navigation, calling `FLASH.stopFlashing` (resetting button color to blue) and scheduling a stale rebuild — despite the cache being intact. Fixed by storing `lastRawTitle` per-window and `return`-ing early when the stripped previous title matches the current non-CC title, skipping ALL flash changes and rebuilds for transient resets.
+  2. The `·` (busy) state fell through to the `else` catch-all which called `stopFlashing` with the normal (blue) color instead of busyColor (green) from agents data. Added an explicit `elseif state == "busy"` that stops flashing but schedules a rebuild so `_gatherWindowData` renders the correct `busyColor`.
+  Also renamed `_fetchWindowInfo` → `FETCH_WINDOW_INFO` (UPPERCASE convention), changed guard to `type(tabInfo) == "table"`, and preserved all cached fields in the AppleScript callback when the AS fails mid-flight.
+  * None of this actually helped
+
 - **Code review cleanup (Phase E):** Made `_adjustFlashTimer` `local` in `flash.lua`. Renamed `shouldShowAndTile` → `needsRetile` with clarifying comment about pre-render timing. Guarded `CACHE._claudeAgentsData` against wipe on empty poll results. Added `CACHE.MISSING` sentinel constant replacing bare `false` in 7 fetcher assignments. Hoisted `hs.window.focusedWindow()` out of per-window loop in `_gatherWindowData`. Scoped all 6 flash module variables (`_sharedFlashTimer`, `_currentFlashInterval`, `_flashingWindows`, `_flashState`, `_flashNormalColor`, `_flashType`) to `local` with `FLASH.flashState(winId)` getter and `FLASH.reset()` replacing the duplicate reset blocks in `init()`/`stop()`.
 
 - **CR follow-up:** Added `:stop()` before nilling `_sharedFlashTimer` in `FLASH.reset()` to prevent timer leak. Added sentinel comment for `CACHE.MISSING` (`nil` = not yet fetched, `false` = fetched but absent).

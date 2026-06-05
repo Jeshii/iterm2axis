@@ -1,12 +1,12 @@
 CACHE._claudeAgentsData = {}
 
-function _fetchWindowInfo(win)
+function FETCH_WINDOW_INFO(win)
 	if not win then
 		return nil
 	end
 	local winId = win:id()
 
-	if CACHE.wc(winId).tabInfo and CACHE.wc(winId).wd then
+	if type(CACHE.wc(winId).tabInfo) == "table" and CACHE.wc(winId).wd then
 		return CACHE.wc(winId).tabInfo
 	end
 
@@ -69,11 +69,16 @@ function _fetchWindowInfo(win)
 				end
 			end
 
-			if not CACHE.wc(winId).tabInfo then
-				CACHE.wc(winId).tabInfo = CACHE.MISSING
+			if (stdout == nil or stdout == "") and type(CACHE.wc(winId).tabInfo) == "table" then
+			-- AppleScript failed (likely title changed mid-flight during a CC transition),
+			-- but we already had valid cached data — preserve all of it rather than stomping to MISSING.
+			else
+				if not CACHE.wc(winId).tabInfo then
+					CACHE.wc(winId).tabInfo = CACHE.MISSING
+				end
+				CACHE.wc(winId).wd = (path and path ~= "") and path or CACHE.MISSING
+				CACHE.wc(winId).hostname = (hostname and hostname ~= "") and hostname or CACHE.MISSING
 			end
-			CACHE.wc(winId).wd = (path and path ~= "") and path or CACHE.MISSING
-			CACHE.wc(winId).hostname = (hostname and hostname ~= "") and hostname or CACHE.MISSING
 
 			if OBJ.sidebarCanvas and OBJ._sidebarEnabled then
 				OBJ:buildSidebar()

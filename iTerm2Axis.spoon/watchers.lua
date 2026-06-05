@@ -175,8 +175,16 @@ function OBJ:_setupWindowWatcher()
 			isCCStateChange = stripped:match("^✳") or stripped:match("^·")
 			isBellStateChange = title:match("^🔔")
 			if not isCCStateChange and not isBellStateChange then
+				local prevStripped = (CACHE.wc(id).lastRawTitle or ""):gsub("^[✳·]%s*", ""):gsub("^🔔", "")
+				if prevStripped == title then
+					-- Transient CC reset (e.g. ✳ /path → /path → · /path):
+					-- skip all flash changes and buildSidebar to avoid
+					-- stopFlashing stomping the button color back to blue.
+					return
+				end
 				CACHE.invalidateWindow(id, { "wd", "tabInfo", "tabPending", "hostname", "branch", "wsName" })
 			end
+			CACHE.wc(id).lastRawTitle = title
 			local focusedWin = hs.window.focusedWindow()
 			local isFocused = focusedWin and focusedWin:id() == id
 			local state = FLASH.claudeState(win)
@@ -184,10 +192,18 @@ function OBJ:_setupWindowWatcher()
 				FLASH.startFlashing(id)
 			elseif state == "bell" and not isFocused then
 				FLASH.startFlashing(id, "bell")
+			elseif state == "busy" then
+				-- Busy is shown as solid green (agents data) — stop flash
+				-- and schedule a rebuild so _gatherWindowData sets busyColor.
+				FLASH.stopFlashing(id)
+				hs.timer.doAfter(self.config.settleDelay, function()
+					self:buildSidebar()
+				end)
 			else
 				FLASH.stopFlashing(id)
 			end
 		end
+		-- Non‑CC title changes: real navigations and bells need a sidebar rebuild.
 		if not isCCStateChange or isBellStateChange then
 			hs.timer.doAfter(self.config.settleDelay, function()
 				self:buildSidebar()
@@ -209,7 +225,7 @@ function OBJ:_setupWindowWatcher()
 				end
 			end
 			CACHE.invalidateWindow(winId, { "tabInfo", "tabPending", "hostname" })
-			_fetchWindowInfo(win)
+			FETCH_WINDOW_INFO(win)
 			hs.timer.doAfter(0.05, function()
 				self:syncCanvasLevel()
 			end)
@@ -248,7 +264,7 @@ end
 function OBJ:_restorePersistedState()
 	for _, win in ipairs(CACHE.getITermWindows()) do
 		self:watchWindow(win)
-		_fetchWindowInfo(win)
+		FETCH_WINDOW_INFO(win)
 	end
 
 	local savedOrder = hs.settings.get(SETTINGS_KEY_ORDER)
