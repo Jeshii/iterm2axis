@@ -6,7 +6,8 @@ function FETCH_WINDOW_INFO(win)
 	end
 	local winId = win:id()
 
-	if type(CACHE.wc(winId).tabInfo) == "table" and CACHE.wc(winId).wd then
+	if type(CACHE.wc(winId).tabInfo) == "table" and CACHE.wc(winId).wd 
+		and CACHE.wc(winId).wd ~= CACHE.MISSING then
 		return CACHE.wc(winId).tabInfo
 	end
 
