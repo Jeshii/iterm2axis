@@ -5,7 +5,7 @@ _flashState = {}
 _flashNormalColor = {}
 _flashType = {}
 
-function claudeState(win)
+function RENDER.claudeState(win)
 	local title = win:title() or ""
 	local stripped = title:gsub("^🔔", "")
 	if stripped:match("^✳") then
@@ -20,15 +20,15 @@ function claudeState(win)
 	return nil
 end
 
-function flashIntervalForType(flashType)
+function RENDER.flashIntervalForType(flashType)
 	return (flashType == "bell") and CFG.bell.flashInterval or CFG.claudecode.flashInterval
 end
 
-function minActiveFlashInterval()
+function RENDER.minActiveFlashInterval()
 	local minInterval = math.huge
 	for wid in pairs(_flashingWindows) do
 		local ft = _flashType[wid] or "waiting"
-		local interval = flashIntervalForType(ft)
+		local interval = RENDER.flashIntervalForType(ft)
 		if interval < minInterval then
 			minInterval = interval
 		end
@@ -47,7 +47,7 @@ function _adjustFlashTimer()
 		return
 	end
 
-	local newInterval = minActiveFlashInterval()
+	local newInterval = RENDER.minActiveFlashInterval()
 	if not _sharedFlashTimer or newInterval ~= _currentFlashInterval then
 		if _sharedFlashTimer then
 			_sharedFlashTimer:stop()
@@ -61,8 +61,8 @@ function _adjustFlashTimer()
 					local normalCol = _flashNormalColor[wid]
 					local flashColor = (_flashType[wid] == "bell") and CFG.bell.flashColor or CFG.waitingFlashColor
 					local newColor = _flashState[wid] and flashColor
-						or (normalCol and color(normalCol) or color(CFG.buttonColor))
-					OBJ.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(newColor))
+						or (normalCol and COLOR(normalCol) or COLOR(CFG.buttonColor))
+					OBJ.sidebarCanvas:elementAttribute(bgIdx, "fillColor", COLOR(newColor))
 				end
 			end
 		end)
@@ -70,7 +70,7 @@ function _adjustFlashTimer()
 	end
 end
 
-function startFlashing(winId, flashType)
+function RENDER.startFlashing(winId, flashType)
 	if _flashingWindows[winId] then
 		return
 	end
@@ -83,7 +83,7 @@ function startFlashing(winId, flashType)
 	_adjustFlashTimer()
 end
 
-function stopFlashing(winId)
+function RENDER.stopFlashing(winId)
 	_flashingWindows[winId] = nil
 	_flashState[winId] = nil
 	_flashType[winId] = nil
@@ -93,7 +93,7 @@ function stopFlashing(winId)
 	if normalColor and OBJ.sidebarCanvas and OBJ.sidebarCanvas:isShowing() then
 		local bgIdx = OBJ._btnBgElements[winId]
 		if bgIdx then
-			OBJ.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(normalColor))
+			OBJ.sidebarCanvas:elementAttribute(bgIdx, "fillColor", COLOR(normalColor))
 		end
 	end
 

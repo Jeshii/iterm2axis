@@ -13,7 +13,7 @@ function OBJ:_closeMenus()
 	end
 end
 
-function isSidebarClickAllowed()
+function RENDER.isSidebarClickAllowed()
 	local front = hs.application.frontmostApplication()
 	if not front then
 		return false
@@ -39,11 +39,11 @@ function OBJ:handleSidebarClick(x, y, rightClick)
 				return
 			end
 			self.activeWindowId = btn.windowId
-			stopFlashing(btn.windowId)
+			RENDER.stopFlashing(btn.windowId)
 			if self._btnBgElements then
 				for wid, bgIdx in pairs(self._btnBgElements) do
 					local c = (wid == btn.windowId) and self.config.activeButtonColor or self.config.buttonColor
-					self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
+					self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", COLOR(c))
 				end
 			end
 			local win = hs.window.get(btn.windowId)
@@ -306,8 +306,8 @@ function OBJ:_setupSidebarClickTap()
 			return false
 		end
 		local mouse = e:location()
-		if rectContains(sf, mouse.x, mouse.y) then
-			if not isSidebarClickAllowed() then
+		if RECT_CONTAINS(sf, mouse.x, mouse.y) then
+			if not RENDER.isSidebarClickAllowed() then
 				return false
 			end
 			local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
@@ -351,8 +351,8 @@ function OBJ:_setupDragTap()
 		local sf = self.sidebarCanvas:frame()
 		local mouse = e:location()
 
-		if rectContains(sf, mouse.x, mouse.y) then
-			if not isSidebarClickAllowed() then
+		if RECT_CONTAINS(sf, mouse.x, mouse.y) then
+			if not RENDER.isSidebarClickAllowed() then
 				return false
 			end
 

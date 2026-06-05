@@ -7,6 +7,7 @@
 
 OBJ = {}
 OBJ.__index = OBJ
+RENDER = {}
 
 -- Metadata
 OBJ.name = "iTerm2Axis"
@@ -70,7 +71,7 @@ KEY_SYMBOLS = {
 	down = "\xe2\x86\x93",
 }
 
-function formatHotkeyLabel(mods, key)
+function FORMAT_HOTKEY_LABEL(mods, key)
 	local result = ""
 	for _, m in ipairs(mods) do
 		result = result .. (MOD_SYMBOLS[m:lower()] or m)
@@ -88,7 +89,7 @@ ACTION_LABELS = {
 -- Helpers
 -- ─────────────────────────────────────────────
 
-function loadVersion()
+function LOAD_VERSION()
 	local scriptPath = hs.spoons.scriptPath()
 	if scriptPath then
 		local versionPath = scriptPath:gsub("init%.lua$", "VERSION")
@@ -102,9 +103,9 @@ function loadVersion()
 		end
 	end
 end
-loadVersion()
+LOAD_VERSION()
 
-function isITerm(win)
+function IS_ITERM(win)
 	if not win then
 		return false
 	end
@@ -123,24 +124,24 @@ function isITerm(win)
 	return bid == ITERM_BID
 end
 
-basePath = hs.spoons.scriptPath():match("^(.*/)")
-dofile(basePath .. "cache.lua")
+BASE_PATH = hs.spoons.scriptPath():match("^(.*/)")
+dofile(BASE_PATH .. "cache.lua")
 
-function color(c)
+function COLOR(c)
 	return { red = c.red, green = c.green, blue = c.blue, alpha = c.alpha }
 end
 
-dofile(basePath .. "flash.lua")
+dofile(BASE_PATH .. "flash.lua")
 
-dofile(basePath .. "fetchers.lua")
+dofile(BASE_PATH .. "fetchers.lua")
 
-dofile(basePath .. "render.lua")
+dofile(BASE_PATH .. "render.lua")
 
-dofile(basePath .. "windows.lua")
+dofile(BASE_PATH .. "windows.lua")
 
-dofile(basePath .. "mouse.lua")
+dofile(BASE_PATH .. "mouse.lua")
 
-dofile(basePath .. "watchers.lua")
+dofile(BASE_PATH .. "watchers.lua")
 
 -- ─────────────────────────────────────────────
 -- Spoon API: bindHotkeys
@@ -168,13 +169,13 @@ function OBJ:bindHotkeys(mapping)
 	local focusDownMods, focusDownKey = table.unpack(map.focusDown or { { "alt", "cmd" }, "down" })
 	local swapSideMods, swapSideKey = table.unpack(map.swapSide or { { "cmd", "shift" }, "S" })
 
-	self._hotkeyLabels.toggle = formatHotkeyLabel(toggleMods, toggleKey)
-	self._hotkeyLabels.refresh = formatHotkeyLabel(refreshMods, refreshKey)
-	self._hotkeyLabels.moveUp = formatHotkeyLabel(moveUpMods, moveUpKey)
-	self._hotkeyLabels.moveDown = formatHotkeyLabel(moveDownMods, moveDownKey)
-	self._hotkeyLabels.moveToTop = formatHotkeyLabel(moveTopMods, moveTopKey)
-	self._hotkeyLabels.moveToBottom = formatHotkeyLabel(moveBottomMods, moveBottomKey)
-	self._hotkeyLabels.swapSide = formatHotkeyLabel(swapSideMods, swapSideKey)
+	self._hotkeyLabels.toggle = FORMAT_HOTKEY_LABEL(toggleMods, toggleKey)
+	self._hotkeyLabels.refresh = FORMAT_HOTKEY_LABEL(refreshMods, refreshKey)
+	self._hotkeyLabels.moveUp = FORMAT_HOTKEY_LABEL(moveUpMods, moveUpKey)
+	self._hotkeyLabels.moveDown = FORMAT_HOTKEY_LABEL(moveDownMods, moveDownKey)
+	self._hotkeyLabels.moveToTop = FORMAT_HOTKEY_LABEL(moveTopMods, moveTopKey)
+	self._hotkeyLabels.moveToBottom = FORMAT_HOTKEY_LABEL(moveBottomMods, moveBottomKey)
+	self._hotkeyLabels.swapSide = FORMAT_HOTKEY_LABEL(swapSideMods, swapSideKey)
 
 	hs.hotkey.bind(toggleMods, toggleKey, function()
 		self:toggleSidebar()

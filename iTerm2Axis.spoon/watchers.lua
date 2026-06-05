@@ -37,7 +37,7 @@ function OBJ:handleWindowMoveOrResize()
 
 		local focusedWin = hs.window.focusedWindow()
 		local anchorWin
-		if focusedWin and isITerm(focusedWin) then
+		if focusedWin and IS_ITERM(focusedWin) then
 			anchorWin = focusedWin
 		else
 			anchorWin = wins[1]
@@ -149,7 +149,7 @@ function OBJ:_setupWindowWatcher()
 				self._windowWatchers[id] = nil
 			end
 			CACHE.winCache[id] = nil
-			stopFlashing(id)
+			RENDER.stopFlashing(id)
 		end
 		CACHE.iTermWindowsCache = nil
 		self:_rebuildAfterSettle(true)
@@ -179,13 +179,13 @@ function OBJ:_setupWindowWatcher()
 			end
 			local focusedWin = hs.window.focusedWindow()
 			local isFocused = focusedWin and focusedWin:id() == id
-			local state = claudeState(win)
+			local state = RENDER.claudeState(win)
 			if state == "waiting" and not isFocused then
-				startFlashing(id)
+				RENDER.startFlashing(id)
 			elseif state == "bell" and not isFocused then
-				startFlashing(id, "bell")
+				RENDER.startFlashing(id, "bell")
 			else
-				stopFlashing(id)
+				RENDER.stopFlashing(id)
 			end
 		end
 		if not isCCStateChange or isBellStateChange then
@@ -198,14 +198,14 @@ function OBJ:_setupWindowWatcher()
 		self:handleWindowMoveOrResize()
 	end)
 	self._winWatcher:subscribe("windowFocused", function(win)
-		if win and isITerm(win) then
+		if win and IS_ITERM(win) then
 			local winId = win:id()
 			self.activeWindowId = winId
-			stopFlashing(winId)
+			RENDER.stopFlashing(winId)
 			if self.sidebarCanvas and self._btnBgElements then
 				for wid, bgIdx in pairs(self._btnBgElements) do
 					local c = (wid == winId) and self.config.activeButtonColor or self.config.buttonColor
-					self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
+					self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", COLOR(c))
 				end
 			end
 			CACHE.invalidateWindow(winId, { "tabInfo", "tabPending", "hostname" })

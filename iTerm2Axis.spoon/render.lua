@@ -1,4 +1,4 @@
-function computeBtnHeight(numRows, dfs)
+function RENDER.computeBtnHeight(numRows, dfs)
 	local PAD_TOP = 5
 	local PAD_BOTTOM = 6
 	local GAP = 3
@@ -13,7 +13,7 @@ function computeBtnHeight(numRows, dfs)
 	return h + PAD_BOTTOM
 end
 
-function ocSnippet(data, fullPath)
+function RENDER.ocSnippet(data, fullPath)
 	if not data or not fullPath or not data[fullPath] then
 		return ""
 	end
@@ -21,7 +21,7 @@ function ocSnippet(data, fullPath)
 	return tostring(d.tokensIn or 0) .. "/" .. tostring(d.tokensOut or 0)
 end
 
-function sidebarStateSnapshot(wins, activeId, opencodeData)
+function RENDER.sidebarStateSnapshot(wins, activeId, opencodeData)
 	local parts = {}
 	for _, win in ipairs(wins) do
 		local id = win:id()
@@ -42,12 +42,11 @@ function sidebarStateSnapshot(wins, activeId, opencodeData)
 				win:title() or "",
 				tabInfoStr,
 				tostring(id == activeId),
-				tostring(_flashState[id] or false),
-				tostring(claudeState(win) or ""),
+				tostring(RENDER.claudeState(win) or ""),
 				tostring(fullPath),
 				tostring(CACHE.wc(id).branch or ""),
 				tostring(CACHE.wc(id).wsName or ""),
-				ocSnippet(opencodeData, fullPath),
+				RENDER.ocSnippet(opencodeData, fullPath),
 				tostring(claudeAgent and claudeAgent.status or ""),
 				tostring(claudeAgent and claudeAgent.waitingFor or ""),
 			}, "\t")
@@ -56,11 +55,11 @@ function sidebarStateSnapshot(wins, activeId, opencodeData)
 	return table.concat(parts, "|")
 end
 
-function sidebarStructureSnapshot(wins, sbW, sbH)
+function RENDER.sidebarStructureSnapshot(wins, sbW, sbH)
 	return #wins .. ":" .. sbW .. "x" .. sbH
 end
 
-function line3Display(wd)
+function RENDER.line3Display(wd)
 	if wd.prFromTitle then
 		return {
 			text = "⎇ PR #" .. wd.prFromTitle,
@@ -80,7 +79,7 @@ function line3Display(wd)
 	return nil
 end
 
-function makeTabLabel(tabInfo)
+function RENDER.makeTabLabel(tabInfo)
 	if not tabInfo or not tabInfo.tabName or tabInfo.tabName == "" then
 		return nil
 	end
@@ -97,7 +96,7 @@ end
 HEADER_COLOR = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 }
 DETAIL_COLOR = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 }
 
-function buildTextRows(wd)
+function RENDER.buildTextRows(wd)
 	local dfs = CFG.defaultFontSize
 	local rows = {}
 	table.insert(rows, { text = wd.label, fs = dfs + 1, color = CFG.textColor })
@@ -107,13 +106,13 @@ function buildTextRows(wd)
 	if wd.basename then
 		table.insert(rows, { text = wd.basename, fs = dfs, color = DETAIL_COLOR })
 	end
-	local l3 = line3Display(wd)
+	local l3 = RENDER.line3Display(wd)
 	if l3 then
 		table.insert(rows, { text = l3.text, fs = dfs, color = l3.color })
 	end
 	if wd.ocData then
 		table.insert(rows, { text = "opencode", fs = dfs - 1, color = HEADER_COLOR })
-		local modelStr = shortModelName(wd.ocData.modelID)
+		local modelStr = SHORT_MODEL_NAME(wd.ocData.modelID)
 		if modelStr then
 			table.insert(rows, { text = modelStr, fs = dfs - 1, color = DETAIL_COLOR })
 		end
@@ -121,9 +120,9 @@ function buildTextRows(wd)
 			table.insert(rows, { text = wd.ocData.agent, fs = dfs - 1, color = DETAIL_COLOR })
 		end
 		if wd.ocData.tokensIn and wd.ocData.tokensIn > 0 then
-			local tokStr = fmtTokens(wd.ocData.tokensIn) .. " in"
+			local tokStr = FMT_TOKENS(wd.ocData.tokensIn) .. " in"
 			if wd.ocData.tokensOut and wd.ocData.tokensOut > 0 then
-				tokStr = tokStr .. " · " .. fmtTokens(wd.ocData.tokensOut) .. " out"
+				tokStr = tokStr .. " · " .. FMT_TOKENS(wd.ocData.tokensOut) .. " out"
 			end
 			table.insert(rows, { text = tokStr, fs = dfs - 1, color = DETAIL_COLOR })
 		end
@@ -182,7 +181,7 @@ function OBJ:_orderedWindows(wins)
 	return itermWins
 end
 
-function windowStatusColor(state, isActive, isDragHover, isFlashing, isFocused)
+function RENDER.windowStatusColor(state, isActive, isDragHover, isFlashing, isFocused)
 	if isDragHover then
 		return CFG.dragHighlightColor
 	elseif state == "waiting" and isFlashing and not isFocused then
@@ -204,11 +203,11 @@ function OBJ:_gatherWindowData(orderedWins)
 		local winId = win:id()
 		local isActive = (winId == self.activeWindowId)
 		local rawTitle = win:title() or ""
-		local parts = parseTitleComponents(rawTitle)
+		local parts = PARSE_TITLE_COMPONENTS(rawTitle)
 		_fetchWindowInfo(win)
 		local fullPath = CACHE.wc(winId).wd
 		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
-		local state = claudeState(win)
+		local state = RENDER.claudeState(win)
 		if claudeAgent and claudeAgent.status and claudeAgent.status ~= "idle" then
 			if claudeAgent.status == "waiting" then
 				state = "waiting"
@@ -219,19 +218,19 @@ function OBJ:_gatherWindowData(orderedWins)
 		local focusedWin = hs.window.focusedWindow()
 		local isFocused = focusedWin and focusedWin:id() == winId
 		local isDragHover = self._dragActive and (winId == self._lastDragHoverId)
-		local btnColor = windowStatusColor(state, isActive, isDragHover, _flashState[winId], isFocused)
+		local btnColor = RENDER.windowStatusColor(state, isActive, isDragHover, _flashState[winId], isFocused)
 
-		local prFromTitle = parsePRFromTitle(rawTitle)
+		local prFromTitle = PARSE_PR_FROM_TITLE(rawTitle)
 		if prFromTitle and prFromTitle <= 0 then
 			prFromTitle = nil
 		end
 		local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
-		local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
+		local branch = fullPath and GET_GIT_BRANCH_FOR_PATH(fullPath, winId) or nil
 		local wsName = CACHE.wc(winId).wsName or nil
 		local hostname = CACHE.wc(winId).hostname or parts.host
 		local tabInfo = CACHE.wc(winId).tabInfo
 		local tabName = tabInfo and tabInfo.tabName
-		local dottedLabel = tabInfo and makeTabLabel(tabInfo)
+		local dottedLabel = tabInfo and RENDER.makeTabLabel(tabInfo)
 		local label = dottedLabel or basename or hostname or ("Window " .. i)
 
 		if tabName and basename and basename == tabName then
@@ -263,7 +262,7 @@ function OBJ:_gatherWindowData(orderedWins)
 			prFromTitle = prFromTitle,
 			ocData = ocData,
 			claudeAgent = claudeAgent,
-			textRows = buildTextRows({
+			textRows = RENDER.buildTextRows({
 				label = label,
 				hostname = hostname,
 				branch = branch,
@@ -280,7 +279,7 @@ end
 PAD_TOP = 5
 GAP = 3
 
-function computeTextArea(textW, rows)
+function RENDER.computeTextArea(textW, rows)
 	local areas = {}
 	local y = PAD_TOP
 	for _, row in ipairs(rows) do
@@ -312,7 +311,7 @@ function OBJ:_renderFullSidebar(sb, winData, structureSnap, btnH)
 	self.sidebarCanvas:appendElements({
 		type = "rectangle",
 		frame = { x = 0, y = 0, w = sb.w, h = sb.h },
-		fillColor = color(CFG.sidebarColor),
+		fillColor = COLOR(CFG.sidebarColor),
 		strokeWidth = 0,
 	})
 
@@ -333,12 +332,12 @@ function OBJ:_renderFullSidebar(sb, winData, structureSnap, btnH)
 	for i, wd in ipairs(winData) do
 		local winId = wd.winId
 		local rows = wd.textRows
-		local areas = computeTextArea(textW, rows)
+		local areas = RENDER.computeTextArea(textW, rows)
 
 		self.sidebarCanvas:appendElements({
 			type = "rectangle",
 			frame = { x = CFG.padding, y = y, w = sb.w - CFG.padding * 2, h = btnH },
-			fillColor = color(wd.btnColor),
+			fillColor = COLOR(wd.btnColor),
 			strokeWidth = 0,
 			roundedRectRadii = { xRadius = 4, yRadius = 4 },
 		})
@@ -351,7 +350,7 @@ function OBJ:_renderFullSidebar(sb, winData, structureSnap, btnH)
 				type = "text",
 				frame = { x = CFG.padding + 6, y = y + a.y, w = a.w, h = a.h },
 				text = row.text,
-				textColor = color(row.color),
+				textColor = COLOR(row.color),
 				textSize = row.fs,
 				textAlignment = "left",
 			})
@@ -396,7 +395,7 @@ function OBJ:_doBuildSidebar()
 		return
 	end
 
-	local snap = sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData)
+	local snap = RENDER.sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData)
 	if snap == self._lastSidebarSnapshot then
 		self._buildPending = false
 		return
@@ -405,7 +404,7 @@ function OBJ:_doBuildSidebar()
 
 	local sb = self:layoutFrames(self:getScreen():frame(), self:getSidebarAnchor()).sidebar
 
-	local structureSnap = sidebarStructureSnapshot(wins, sb.w, sb.h)
+	local structureSnap = RENDER.sidebarStructureSnapshot(wins, sb.w, sb.h)
 	local shouldShowAndTile = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
 
 	local orderedWins = self:_orderedWindows(wins)
@@ -416,18 +415,16 @@ function OBJ:_doBuildSidebar()
 			maxNumRows = #wd.textRows
 		end
 	end
-	local btnH = computeBtnHeight(maxNumRows, CFG.defaultFontSize)
+	local btnH = RENDER.computeBtnHeight(maxNumRows, CFG.defaultFontSize)
 
 	self:_renderFullSidebar(sb, winData, structureSnap, btnH)
 
 	self._buildPending = false
 	self:syncCanvasLevel()
-	if shouldShowAndTile and self._sidebarEnabled then
-		self.sidebarCanvas:show()
-		self._sidebarVisible = true
-		if not self._skipTileOnThisBuild then
-			self:tileITermWindows(sb)
-		end
+	self.sidebarCanvas:show()
+	self._sidebarVisible = true
+	if shouldShowAndTile and self._sidebarEnabled and not self._skipTileOnThisBuild then
+		self:tileITermWindows(sb)
 	end
 	self._skipTileOnThisBuild = false
 	if self._swapInProgress then

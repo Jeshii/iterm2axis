@@ -11,7 +11,7 @@ function CACHE.getITermWindows()
 	local all = hs.window.allWindows()
 	local result = {}
 	for _, w in ipairs(all) do
-		if isITerm(w) and w:isStandard() and not w:isMinimized() then
+		if IS_ITERM(w) and w:isStandard() and not w:isMinimized() then
 			table.insert(result, w)
 		end
 	end
@@ -23,7 +23,7 @@ function CACHE.getITermWindows()
 	return result
 end
 
-function parseTitleComponents(title)
+function PARSE_TITLE_COMPONENTS(title)
 	if not title or title == "" then
 		return {}
 	end
@@ -59,7 +59,7 @@ function parseTitleComponents(title)
 	}
 end
 
-function parsePRFromTitle(title)
+function PARSE_PR_FROM_TITLE(title)
 	if not title or title == "" then
 		return nil
 	end
@@ -67,7 +67,7 @@ function parsePRFromTitle(title)
 	return n and tonumber(n) or nil
 end
 
-function rectContains(rect, x, y)
+function RECT_CONTAINS(rect, x, y)
 	return rect and x >= rect.x and x <= rect.x + rect.w and y >= rect.y and y <= rect.y + rect.h
 end
 

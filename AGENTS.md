@@ -46,7 +46,8 @@ A Hammerspoon window manager that provides a sidebar (configurable left or right
 - Don't write monolithic, hard to read functions
 - If functionality already exists in iTerm2, don't try to recreate it
 - Do not push changes to the remote without asking first
-- Window label priority: tab name with dot indicators (via `makeTabLabel`) → PWD basename → remote hostname → "Window N" fallback
+- Window label priority: tab name with dot indicators (via `RENDER.makeTabLabel`) → PWD basename → remote hostname → "Window N" fallback
+- Global naming conventions: display-state functions on `RENDER.*`, stateless helpers UPPERCASE (`COLOR`, `IS_ITERM`, etc.), `_`-prefixed internals as-is. New globals should follow the same pattern.
 - Update CHANGELOG.md after making any changes
 - Inform the user if AGENTS.md or README.md need updates after making any changes
 - When the user asks about releasing, remind them to update the version number at the top of `iTerm2Axis.spoon/init.lua`

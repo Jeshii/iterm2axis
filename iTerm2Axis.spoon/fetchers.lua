@@ -84,7 +84,7 @@ function _fetchWindowInfo(win)
 	return CACHE.wc(winId).tabInfo or nil
 end
 
-function getGitBranchForPath(path, winId)
+function GET_GIT_BRANCH_FOR_PATH(path, winId)
 	if not path or not winId then
 		return nil
 	end
@@ -152,7 +152,7 @@ function getGitBranchForPath(path, winId)
 	return CACHE.wc(winId).branch or nil
 end
 
-function shortModelName(id)
+function SHORT_MODEL_NAME(id)
 	if not id or id == "" then
 		return nil
 	end
@@ -160,7 +160,7 @@ function shortModelName(id)
 	return name
 end
 
-function fmtTokens(n)
+function FMT_TOKENS(n)
 	if n >= 1000000 then
 		return string.format("%.1fM", n / 1e6)
 	end
@@ -220,7 +220,7 @@ function OBJ:_finalizeOpenCodeData(newData)
 	end
 end
 
-function normalizeOCSession(s)
+function NORMALIZE_OC_SESSION(s)
 	if not s.directory then
 		return nil
 	end
@@ -259,7 +259,7 @@ function OBJ:fetchOpenCodeData()
 					if ok and type(sessions) == "table" then
 						for _, s in ipairs(sessions) do
 							if s.directory then
-								local record = normalizeOCSession(s)
+								local record = NORMALIZE_OC_SESSION(s)
 								if record then
 									local existing = newData[s.directory]
 									if not existing or (s.time_updated or 0) > existing.updated then
@@ -290,7 +290,7 @@ function OBJ:fetchOpenCodeData()
 								if ok and type(sessions) == "table" then
 									for _, s in ipairs(sessions) do
 										if s.directory and not newData[s.directory] then
-											local record = normalizeOCSession(s)
+											local record = NORMALIZE_OC_SESSION(s)
 											if record then
 												newData[s.directory] = record
 											end

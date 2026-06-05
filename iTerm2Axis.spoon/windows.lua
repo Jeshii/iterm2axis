@@ -60,7 +60,7 @@ function OBJ:refreshLayout()
 	local wins = CACHE.getITermWindows()
 	if #wins > 0 then
 		local anchorWin = hs.window.focusedWindow()
-		if not (anchorWin and isITerm(anchorWin)) then
+		if not (anchorWin and IS_ITERM(anchorWin)) then
 			anchorWin = wins[1]
 		end
 		local f = anchorWin:frame()
@@ -122,13 +122,13 @@ function OBJ:bringWindowToFront(windowId)
 	if not win then
 		return
 	end
-	stopFlashing(windowId)
+	RENDER.stopFlashing(windowId)
 	self.activeWindowId = windowId
 
 	if self.sidebarCanvas and self._btnBgElements then
 		for wid, bgIdx in pairs(self._btnBgElements) do
 			local c = (wid == windowId) and self.config.activeButtonColor or self.config.buttonColor
-			self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", color(c))
+			self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", COLOR(c))
 		end
 	end
 

@@ -1,5 +1,8 @@
 ## 2026-06-05
 
+- **Fixed canvas disappearing on async data updates** — `_renderFullSidebar` always runs when the sidebar snapshot changes (triggered by async callbacks: git branch, claude/opencode polling, window titles, etc.), deleting the old canvas and creating a new hidden one. But `show()` was gated by `shouldShowAndTile`, which only fires when the window structure (count/dimensions) changes. Any non-structural snapshot change caused the canvas to hide. Moved `show()` and `_sidebarVisible = true` outside the guard — only tiling remains conditional. Also removed `_flashState` from `sidebarStateSnapshot` since the flash timer handles its own visual updates via direct `elementAttribute` mutations, reducing unnecessary rebuilds.
+- **Global naming convention cleanup** — moved display-state globals to `RENDER.*` namespace (`sidebarStateSnapshot`, `startFlashing`, `claudeState`, 14 total), uppercased stateless helpers (`COLOR`, `IS_ITERM`, `GET_GIT_BRANCH_FOR_PATH`, `BASE_PATH`, 12 total), left `_`-prefixed internals as-is. `.luarc.json` `diagnostics.globals` shrunk from 8 entries to just `["hs"]`. Zero `lowercase-global` warnings.
+
 - **Phase 1 (Change 1): Fixed `_hotkeyLabels` dead state** — added `formatHotkeyLabel()` helper with `MOD_SYMBOLS`/`KEY_SYMBOLS` lookup tables that convert modifier/key arrays to display strings (e.g. `{"cmd","shift"},"S"` → `"⌘⇧S"`). `bindHotkeys()` now populates `self._hotkeyLabels` from the binding parameters, so user-customized hotkeys automatically update context menu shortcuts. Removed the dead `self._hotkeyLabels and self._hotkeyLabels.xxx or "fallback"` pattern from `showWindowMenu`/`showGlobalMenu`.
 
 - **Phase 1 (Change 2): Replaced inline menu teardown with `self:_closeMenus()`**
