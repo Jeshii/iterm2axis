@@ -236,16 +236,25 @@ end
 
 -- Per-window git branch cache, keyed by windowId.
 -- Uses hs.task for async git lookups so buildSidebar never blocks.
-local _gitBranchCache = {} -- [windowId] = branch string or false
-local _gitBranchPending = {} -- [windowId] = true (fetch in flight)
-local _gitWsNameCache = {} -- [windowId] = worktree leaf name string or false
+local _winCache = {} -- [winId] = { wd, tabInfo, tabPending, hostname, branch, brPending, wsName, pr, prBranch, prPending }
+
+local function wc(winId)
+	_winCache[winId] = _winCache[winId] or {}
+	return _winCache[winId]
+end
+
+local function invalidateWindow(id, fields)
+	if not _winCache[id] then
+		return
+	end
+	local c = _winCache[id]
+	for _, f in ipairs(fields) do
+		c[f] = nil
+	end
+end
 
 -- Per-window working directory cache, keyed by windowId.
 -- Invalidated on windowTitleChanged (which fires when PWD changes with shell integration).
-local _wdCache = {} -- [windowId] = path string or false
-local _tabInfoCache = {} -- [windowId] = { tabCount, focusedIdx, tabName }
-local _tabInfoPending = {} -- [windowId] = true (fetch in flight)
-local _hostnameCache = {} -- [windowId] = hostname string or false
 
 local function _fetchWindowInfo(win)
 	if not win then
@@ -253,14 +262,14 @@ local function _fetchWindowInfo(win)
 	end
 	local winId = win:id()
 
-	if _tabInfoCache[winId] and _wdCache[winId] then
-		return _tabInfoCache[winId]
+	if wc(winId).tabInfo and wc(winId).wd then
+		return wc(winId).tabInfo
 	end
 
-	if _tabInfoPending[winId] then
-		return _tabInfoCache[winId] or nil
+	if wc(winId).tabPending then
+		return wc(winId).tabInfo or nil
 	end
-	_tabInfoPending[winId] = true
+	wc(winId).tabPending = true
 
 	-- Match by window title instead of CGWindowID, since iTerm2's AppleScript
 	-- window ID differs from Hammerspoon's CGWindowID.
@@ -301,14 +310,14 @@ local function _fetchWindowInfo(win)
 
 	hs.task
 		.new("/usr/bin/osascript", function(exitCode, stdout, stderr)
-			_tabInfoPending[winId] = nil
+			wc(winId).tabPending = nil
 			local path, hostname
 
 			if stdout and stdout ~= "" then
 				local tabCount, focusedIdx, tabName, tPath, tHost =
 					stdout:match("^([^\x1e]+)\x1e([^\x1e]+)\x1e([^\x1e]+)\x1e([^\x1e]*)\x1e([^\x1e]*)$")
 				if tabCount then
-					_tabInfoCache[winId] = {
+					wc(winId).tabInfo = {
 						tabCount = tonumber(tabCount),
 						focusedIdx = tonumber(focusedIdx),
 						tabName = tabName,
@@ -318,11 +327,11 @@ local function _fetchWindowInfo(win)
 				end
 			end
 
-			if not _tabInfoCache[winId] then
-				_tabInfoCache[winId] = false
+			if not wc(winId).tabInfo then
+				wc(winId).tabInfo = false
 			end
-			_wdCache[winId] = (path and path ~= "") and path or false
-			_hostnameCache[winId] = (hostname and hostname ~= "") and hostname or false
+			wc(winId).wd = (path and path ~= "") and path or false
+			wc(winId).hostname = (hostname and hostname ~= "") and hostname or false
 
 			if obj.sidebarCanvas and obj._sidebarEnabled then
 				obj:buildSidebar()
@@ -330,7 +339,7 @@ local function _fetchWindowInfo(win)
 		end, { "-e", script })
 		:start()
 
-	return _tabInfoCache[winId] or nil
+	return wc(winId).tabInfo or nil
 end
 
 local function getGitBranchForPath(path, winId)
@@ -338,14 +347,14 @@ local function getGitBranchForPath(path, winId)
 		return nil
 	end
 
-	if _gitBranchCache[winId] ~= nil and _wdCache[winId] == path then
-		return _gitBranchCache[winId] or nil
+	if wc(winId).branch ~= nil and wc(winId).wd == path then
+		return wc(winId).branch or nil
 	end
 
-	if _gitBranchPending[winId] then
-		return _gitBranchCache[winId] or nil
+	if wc(winId).brPending then
+		return wc(winId).branch or nil
 	end
-	_gitBranchPending[winId] = true
+	wc(winId).brPending = true
 
 	hs.task
 		.new("/usr/bin/git", function(_, stdout, _)
@@ -354,7 +363,7 @@ local function getGitBranchForPath(path, winId)
 				-- Chained fallback for detached HEAD / worktree (async, non-blocking)
 				hs.task
 					.new("/bin/sh", function(_, out, _)
-						_gitBranchPending[winId] = nil
+						wc(winId).brPending = nil
 						local b, ws
 						if out and out ~= "" then
 							b, ws = out:match("^([^\t]+)\t?(.*)$")
@@ -364,9 +373,9 @@ local function getGitBranchForPath(path, winId)
 								ws = nil
 							end
 						end
-						_gitBranchCache[winId] = (b and b ~= "") and b or false
+						wc(winId).branch = (b and b ~= "") and b or false
 						local wsLeaf = ws and ws:match("([^/]+)%s*$")
-						_gitWsNameCache[winId] = (wsLeaf and wsLeaf ~= "") and wsLeaf or false
+						wc(winId).wsName = (wsLeaf and wsLeaf ~= "") and wsLeaf or false
 						hs.timer.doAfter(0, function()
 							if obj.sidebarCanvas and obj._sidebarEnabled then
 								obj:buildSidebar()
@@ -388,9 +397,9 @@ local function getGitBranchForPath(path, winId)
 					:start()
 				return
 			end
-			_gitBranchPending[winId] = nil
-			_gitBranchCache[winId] = (branch and branch ~= "") and branch or false
-			_gitWsNameCache[winId] = false
+			wc(winId).brPending = nil
+			wc(winId).branch = (branch and branch ~= "") and branch or false
+			wc(winId).wsName = false
 			hs.timer.doAfter(0, function()
 				if obj.sidebarCanvas and obj._sidebarEnabled then
 					obj:buildSidebar()
@@ -399,7 +408,7 @@ local function getGitBranchForPath(path, winId)
 		end, { "-C", path, "rev-parse", "--abbrev-ref", "HEAD" })
 		:start()
 
-	return _gitBranchCache[winId] or nil
+	return wc(winId).branch or nil
 end
 
 -- Per-window Claude Code flash state for ✳ waiting indicator.
@@ -583,9 +592,6 @@ end
 
 -- Per-window PR cache, keyed by windowId.
 -- Uses hs.task for async gh pr view so buildSidebar never blocks.
-local _prCache = {} -- [windowId] = { number, title } or false
-local _prBranchCache = {} -- [windowId] = branch string last checked
-local _prPending = {} -- [windowId] = true (fetch in flight)
 
 local function getOpenPRForWindow(win)
 	if not win then
@@ -593,33 +599,33 @@ local function getOpenPRForWindow(win)
 	end
 	local winId = win:id()
 	_fetchWindowInfo(win)
-	local fullPath = _wdCache[winId]
+	local fullPath = wc(winId).wd
 	local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
 	if not branch then
-		_prCache[winId] = false
+		wc(winId).pr = false
 		return nil
 	end
 
-	if _prBranchCache[winId] == branch then
-		return _prCache[winId] or nil
+	if wc(winId).prBranch == branch then
+		return wc(winId).pr or nil
 	end
 
-	if _prPending[winId] then
-		return _prCache[winId] or nil
+	if wc(winId).prPending then
+		return wc(winId).pr or nil
 	end
-	_prBranchCache[winId] = branch
+	wc(winId).prBranch = branch
 
 	if not fullPath then
-		_prCache[winId] = false
+		wc(winId).pr = false
 		return nil
 	end
 
-	_prPending[winId] = true
+	wc(winId).prPending = true
 	hs.task
 		.new("/bin/sh", function(_, stdout, _)
-			_prPending[winId] = nil
+			wc(winId).prPending = nil
 			local ok, pr = pcall(hs.json.decode, stdout or "")
-			_prCache[winId] = (ok and pr and pr.number) and pr or false
+			wc(winId).pr = (ok and pr and pr.number) and pr or false
 			hs.timer.doAfter(0, function()
 				if obj.sidebarCanvas and obj._sidebarEnabled then
 					obj:buildSidebar()
@@ -631,7 +637,7 @@ local function getOpenPRForWindow(win)
 		})
 		:start()
 
-	return _prCache[winId] or nil
+	return wc(winId).pr or nil
 end
 
 function obj:_finalizeOpenCodeData(newData)
@@ -837,9 +843,9 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData)
 	local parts = {}
 	for _, win in ipairs(wins) do
 		local id = win:id()
-		local fullPath = _wdCache[id] or ""
+		local fullPath = wc(id).wd or ""
 		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
-		local ti = _tabInfoCache[id]
+		local ti = wc(id).tabInfo
 		local tabInfoStr = ti
 				and table.concat({
 					tostring(ti.tabCount),
@@ -857,8 +863,8 @@ local function sidebarStateSnapshot(wins, activeId, opencodeData)
 				tostring(_flashState[id] or false),
 				tostring(claudeState(win) or ""),
 				tostring(fullPath),
-				tostring(_gitBranchCache[id] or ""),
-				tostring(_gitWsNameCache[id] or ""),
+				tostring(wc(id).branch or ""),
+				tostring(wc(id).wsName or ""),
 				ocSnippet(opencodeData, fullPath),
 				tostring(claudeAgent and claudeAgent.status or ""),
 				tostring(claudeAgent and claudeAgent.waitingFor or ""),
@@ -1041,7 +1047,7 @@ function obj:_gatherWindowData(orderedWins)
 		local rawTitle = win:title() or ""
 		local parts = parseTitleComponents(rawTitle)
 		_fetchWindowInfo(win)
-		local fullPath = _wdCache[winId]
+		local fullPath = wc(winId).wd
 		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
 		-- Prefer claude agents --json status over title heuristic.
 		-- Bell state is kept from title only (not in agents data).
@@ -1064,9 +1070,9 @@ function obj:_gatherWindowData(orderedWins)
 		end
 		local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
 		local branch = fullPath and getGitBranchForPath(fullPath, winId) or nil
-		local wsName = _gitWsNameCache[winId] or nil
-		local hostname = _hostnameCache[winId] or parts.host
-		local tabInfo = _tabInfoCache[winId]
+		local wsName = wc(winId).wsName or nil
+		local hostname = wc(winId).hostname or parts.host
+		local tabInfo = wc(winId).tabInfo
 		local tabName = tabInfo and tabInfo.tabName
 		local dottedLabel = tabInfo and makeTabLabel(tabInfo)
 		local label = dottedLabel or basename or hostname or ("Window " .. i)
@@ -1875,15 +1881,10 @@ function obj:handleWindowMoveOrResize()
 
 		if screenChanged then
 			for _, win in ipairs(wins) do
-				local id = win:id()
-				_wdCache[id] = nil
-				_tabInfoCache[id] = nil
-				_tabInfoPending[id] = nil
-				_hostnameCache[id] = nil
-				_gitBranchCache[id] = nil
-				_gitWsNameCache[id] = nil
-				_prCache[id] = nil
-				_prBranchCache[id] = nil
+				invalidateWindow(
+					win:id(),
+					{ "wd", "tabInfo", "tabPending", "hostname", "branch", "wsName", "pr", "prBranch" }
+				)
 			end
 			self._currentScreen = newScreen
 			self._pendingSidebarFrame = nil
@@ -2178,16 +2179,7 @@ function obj:_setupWindowWatcher()
 				self._windowWatchers[id]:stop()
 				self._windowWatchers[id] = nil
 			end
-			_gitBranchCache[id] = nil
-			_gitBranchPending[id] = nil
-			_gitWsNameCache[id] = nil
-			_prCache[id] = nil
-			_prBranchCache[id] = nil
-			_prPending[id] = nil
-			_wdCache[id] = nil
-			_tabInfoCache[id] = nil
-			_tabInfoPending[id] = nil
-			_hostnameCache[id] = nil
+			_winCache[id] = nil
 			stopFlashing(id)
 		end
 		_iTermWindowsCache = nil
@@ -2214,12 +2206,7 @@ function obj:_setupWindowWatcher()
 			isCCStateChange = stripped:match("^✳") or stripped:match("^·")
 			isBellStateChange = title:match("^🔔")
 			if not isCCStateChange and not isBellStateChange then
-				_wdCache[id] = nil
-				_tabInfoCache[id] = nil
-				_tabInfoPending[id] = nil
-				_hostnameCache[id] = nil
-				_gitBranchCache[id] = nil
-				_gitWsNameCache[id] = nil
+				invalidateWindow(id, { "wd", "tabInfo", "tabPending", "hostname", "branch", "wsName" })
 			end
 			local focusedWin = hs.window.focusedWindow()
 			local isFocused = focusedWin and focusedWin:id() == id
@@ -2253,9 +2240,7 @@ function obj:_setupWindowWatcher()
 				end
 			end
 			-- Refresh tab info on focus to catch tab switches that don't fire titleChanged
-			_tabInfoCache[winId] = nil
-			_tabInfoPending[winId] = nil
-			_hostnameCache[winId] = nil
+			invalidateWindow(winId, { "tabInfo", "tabPending", "hostname" })
 			_fetchWindowInfo(win)
 			hs.timer.doAfter(0.05, function()
 				self:syncCanvasLevel()
@@ -2436,16 +2421,7 @@ function obj:stop()
 	end
 	_iTermWindowsCache = nil
 	_iTermWindowsCacheTime = 0
-	_gitBranchCache = {}
-	_gitBranchPending = {}
-	_gitWsNameCache = {}
-	_prCache = {}
-	_prBranchCache = {}
-	_prPending = {}
-	_wdCache = {}
-	_tabInfoCache = {}
-	_tabInfoPending = {}
-	_hostnameCache = {}
+	_winCache = {}
 	if _sharedFlashTimer then
 		_sharedFlashTimer:stop()
 		_sharedFlashTimer = nil
@@ -2507,16 +2483,7 @@ function obj:init()
 	self._lastStructureSnapshot = nil
 	_iTermWindowsCache = nil
 	_iTermWindowsCacheTime = 0
-	_gitBranchCache = {}
-	_gitBranchPending = {}
-	_gitWsNameCache = {}
-	_prCache = {}
-	_prBranchCache = {}
-	_prPending = {}
-	_wdCache = {}
-	_tabInfoCache = {}
-	_tabInfoPending = {}
-	_hostnameCache = {}
+	_winCache = {}
 	_sharedFlashTimer = nil
 	_currentFlashInterval = nil
 	_flashingWindows = {}
