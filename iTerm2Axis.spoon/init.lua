@@ -252,7 +252,7 @@ local function _fetchWindowInfo(win)
 	end
 	local winId = win:id()
 
-	if _tabInfoCache[winId] ~= nil and _wdCache[winId] ~= nil then
+	if _tabInfoCache[winId] and _wdCache[winId] then
 		return _tabInfoCache[winId]
 	end
 

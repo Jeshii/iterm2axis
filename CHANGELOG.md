@@ -2,7 +2,8 @@
 
 - **Phase 1 (Change 1): Fixed `_hotkeyLabels` dead state** — added `formatHotkeyLabel()` helper with `MOD_SYMBOLS`/`KEY_SYMBOLS` lookup tables that convert modifier/key arrays to display strings (e.g. `{"cmd","shift"},"S"` → `"⌘⇧S"`). `bindHotkeys()` now populates `self._hotkeyLabels` from the binding parameters, so user-customized hotkeys automatically update context menu shortcuts. Removed the dead `self._hotkeyLabels and self._hotkeyLabels.xxx or "fallback"` pattern from `showWindowMenu`/`showGlobalMenu`.
 
-- **Phase 1 (Change 2): Replaced inline menu teardown with `self:_closeMenus()`** — `showWindowMenu` and `showGlobalMenu` each had an identical 8-line inline block duplicating `_closeMenus()`. Replaced both with a single `self:_closeMenus()` call.
+- **Phase 1 (Change 2): Replaced inline menu teardown with `self:_closeMenus()`**
+- **Phase 1 (Change 3): Fixed `_fetchWindowInfo` silent false-negative** — early-return condition `~= nil` matched both `nil` (unfetched) and `false` (fetch returned empty), preventing retry when AppleScript failed. Changed to truthy check so `false` values trigger a new fetch while respecting the pending guard. — `showWindowMenu` and `showGlobalMenu` each had an identical 8-line inline block duplicating `_closeMenus()`. Replaced both with a single `self:_closeMenus()` call.
 
 ## 2026-06-04
 
