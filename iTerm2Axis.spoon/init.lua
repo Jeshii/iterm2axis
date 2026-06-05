@@ -404,6 +404,7 @@ end
 
 -- Per-window Claude Code flash state for ✳ waiting indicator.
 local _sharedFlashTimer = nil -- single hs.timer instance
+local _currentFlashInterval = nil -- current timer interval; nil when no timer
 local _flashingWindows = {} -- { [winId] = true } set of active windows
 local _flashState = {}
 local _flashNormalColor = {}
@@ -427,20 +428,40 @@ local function claudeState(win)
 	return nil
 end
 
-local function startFlashing(winId, flashType)
-	if _flashingWindows[winId] then
+local function flashIntervalForType(flashType)
+	return (flashType == "bell") and cfg.bell.flashInterval or cfg.claudecode.flashInterval
+end
+
+local function minActiveFlashInterval()
+	local minInterval = math.huge
+	for wid in pairs(_flashingWindows) do
+		local ft = _flashType[wid] or "waiting"
+		local interval = flashIntervalForType(ft)
+		if interval < minInterval then
+			minInterval = interval
+		end
+	end
+	return minInterval
+end
+
+local function _adjustFlashTimer()
+	if not next(_flashingWindows) then
+		if _sharedFlashTimer then
+			_sharedFlashTimer:stop()
+			_sharedFlashTimer = nil
+			_currentFlashInterval = nil
+			_currentFlashInterval = nil
+		end
 		return
 	end
-	flashType = flashType or "waiting"
-	_flashType[winId] = flashType
-	_flashState[winId] = true
-	local isActive = (winId == obj.activeWindowId)
-	_flashNormalColor[winId] = isActive and cfg.activeButtonColor or cfg.buttonColor
-	_flashingWindows[winId] = true
 
-	if not _sharedFlashTimer then
-		local interval = (flashType == "bell") and cfg.bell.flashInterval or cfg.claudecode.flashInterval
-		_sharedFlashTimer = hs.timer.new(interval, function()
+	local newInterval = minActiveFlashInterval()
+	if not _sharedFlashTimer or newInterval ~= _currentFlashInterval then
+		if _sharedFlashTimer then
+			_sharedFlashTimer:stop()
+		end
+		_currentFlashInterval = newInterval
+		_sharedFlashTimer = hs.timer.new(newInterval, function()
 			for wid in pairs(_flashingWindows) do
 				_flashState[wid] = not _flashState[wid]
 				local bgIdx = obj._btnBgElements[wid]
@@ -455,6 +476,19 @@ local function startFlashing(winId, flashType)
 		end)
 		_sharedFlashTimer:start()
 	end
+end
+
+local function startFlashing(winId, flashType)
+	if _flashingWindows[winId] then
+		return
+	end
+	flashType = flashType or "waiting"
+	_flashType[winId] = flashType
+	_flashState[winId] = true
+	local isActive = (winId == obj.activeWindowId)
+	_flashNormalColor[winId] = isActive and cfg.activeButtonColor or cfg.buttonColor
+	_flashingWindows[winId] = true
+	_adjustFlashTimer()
 end
 
 local function stopFlashing(winId)
@@ -472,11 +506,7 @@ local function stopFlashing(winId)
 		end
 	end
 
-	-- Stop shared timer if no windows remain
-	if not next(_flashingWindows) and _sharedFlashTimer then
-		_sharedFlashTimer:stop()
-		_sharedFlashTimer = nil
-	end
+	_adjustFlashTimer()
 end
 
 -- ─────────────────────────────────────────────
@@ -2461,6 +2491,7 @@ function obj:stop()
 	if _sharedFlashTimer then
 		_sharedFlashTimer:stop()
 		_sharedFlashTimer = nil
+		_currentFlashInterval = nil
 	end
 	_flashingWindows = {}
 	_flashState = {}
@@ -2529,6 +2560,7 @@ function obj:init()
 	_tabInfoPending = {}
 	_hostnameCache = {}
 	_sharedFlashTimer = nil
+	_currentFlashInterval = nil
 	_flashingWindows = {}
 	_flashState = {}
 	_flashNormalColor = {}

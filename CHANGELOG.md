@@ -4,7 +4,8 @@
 
 - **Phase 1 (Change 2): Replaced inline menu teardown with `self:_closeMenus()`**
 - **Phase 1 (Change 3): Fixed `_fetchWindowInfo` silent false-negative**
-- **Phase 1 (Change 4): Added `busyColor` to config** — replaced the only hardcoded inline color in `_gatherWindowData` with a new `cfg.busyColor` entry, making it themable like all other colors. — early-return condition `~= nil` matched both `nil` (unfetched) and `false` (fetch returned empty), preventing retry when AppleScript failed. Changed to truthy check so `false` values trigger a new fetch while respecting the pending guard. — `showWindowMenu` and `showGlobalMenu` each had an identical 8-line inline block duplicating `_closeMenus()`. Replaced both with a single `self:_closeMenus()` call.
+- **Phase 1 (Change 4): Added `busyColor` to config**
+- **Phase 1 (Change 5): Fixed `startFlashing` mixed-type interval with `_adjustFlashTimer()`** — extracted `flashIntervalForType()`, `minActiveFlashInterval()`, and `_adjustFlashTimer()` helpers. `startFlashing` and `stopFlashing` now both call `_adjustFlashTimer()`, which (re)creates the shared timer at the minimum interval across all active flash types. When a fast-type window leaves, the timer correctly grows back to the next shortest interval. Removed the single-type interval assignment and manual teardown in `stopFlashing`. — replaced the only hardcoded inline color in `_gatherWindowData` with a new `cfg.busyColor` entry, making it themable like all other colors. — early-return condition `~= nil` matched both `nil` (unfetched) and `false` (fetch returned empty), preventing retry when AppleScript failed. Changed to truthy check so `false` values trigger a new fetch while respecting the pending guard. — `showWindowMenu` and `showGlobalMenu` each had an identical 8-line inline block duplicating `_closeMenus()`. Replaced both with a single `self:_closeMenus()` call.
 
 ## 2026-06-04
 
