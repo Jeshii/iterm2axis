@@ -1,4 +1,4 @@
-_claudeAgentsData = {}
+CACHE._claudeAgentsData = {}
 
 function _fetchWindowInfo(win)
 	if not win then
@@ -193,7 +193,7 @@ function OBJ:fetchClaudeAgentsData()
 					end
 				end
 			end
-			_claudeAgentsData = newData
+			CACHE._claudeAgentsData = newData
 			if self.sidebarCanvas and self._sidebarEnabled then
 				self:buildSidebar()
 			end
@@ -278,8 +278,9 @@ function OBJ:fetchOpenCodeData()
 
 				local dbPath = os.getenv("HOME") .. "/.local/share/opencode/opencode.db"
 				local sql =
-					"SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC"
+					"SELECT title, directory, model, agent, tokens_input, tokens_output, time_updated FROM session ORDER BY time_updated DESC LIMIT 50"
 
+				self._opencodePending = false
 				local sqlOk = pcall(function()
 					hs.task
 						.new("/usr/bin/sqlite3", function(_, dbStdout, _)

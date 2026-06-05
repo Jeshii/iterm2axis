@@ -149,7 +149,7 @@ function OBJ:_setupWindowWatcher()
 				self._windowWatchers[id] = nil
 			end
 			CACHE.winCache[id] = nil
-			RENDER.stopFlashing(id)
+			FLASH.stopFlashing(id)
 		end
 		CACHE.iTermWindowsCache = nil
 		self:_rebuildAfterSettle(true)
@@ -179,13 +179,13 @@ function OBJ:_setupWindowWatcher()
 			end
 			local focusedWin = hs.window.focusedWindow()
 			local isFocused = focusedWin and focusedWin:id() == id
-			local state = RENDER.claudeState(win)
+			local state = FLASH.claudeState(win)
 			if state == "waiting" and not isFocused then
-				RENDER.startFlashing(id)
+				FLASH.startFlashing(id)
 			elseif state == "bell" and not isFocused then
-				RENDER.startFlashing(id, "bell")
+				FLASH.startFlashing(id, "bell")
 			else
-				RENDER.stopFlashing(id)
+				FLASH.stopFlashing(id)
 			end
 		end
 		if not isCCStateChange or isBellStateChange then
@@ -201,7 +201,7 @@ function OBJ:_setupWindowWatcher()
 		if win and IS_ITERM(win) then
 			local winId = win:id()
 			self.activeWindowId = winId
-			RENDER.stopFlashing(winId)
+			FLASH.stopFlashing(winId)
 			if self.sidebarCanvas and self._btnBgElements then
 				for wid, bgIdx in pairs(self._btnBgElements) do
 					local c = (wid == winId) and self.config.activeButtonColor or self.config.buttonColor

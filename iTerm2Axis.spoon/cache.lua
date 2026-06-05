@@ -87,29 +87,3 @@ function CACHE.invalidateWindow(id, fields)
 		c[f] = nil
 	end
 end
-
-function OBJ:findWindowScreen(wins)
-	if #wins == 0 then
-		return hs.screen.mainScreen()
-	end
-	local win = wins[1]
-	local wf = win:frame()
-	local winCenter = { x = wf.x + wf.w / 2, y = wf.y + wf.h / 2 }
-	for _, screen in ipairs(hs.screen.allScreens()) do
-		local sf = screen:frame()
-		if winCenter.x >= sf.x and winCenter.x < sf.x + sf.w and winCenter.y >= sf.y and winCenter.y < sf.y + sf.h then
-			return screen
-		end
-	end
-	return hs.screen.mainScreen()
-end
-
-function OBJ:getScreen()
-	if self._currentScreen then
-		return self._currentScreen
-	end
-	local wins = CACHE.getITermWindows()
-	local screen = self:findWindowScreen(wins)
-	self._currentScreen = screen
-	return screen
-end

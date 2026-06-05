@@ -13,7 +13,7 @@ function OBJ:_closeMenus()
 	end
 end
 
-function RENDER.isSidebarClickAllowed()
+local function isSidebarClickAllowed()
 	local front = hs.application.frontmostApplication()
 	if not front then
 		return false
@@ -39,7 +39,7 @@ function OBJ:handleSidebarClick(x, y, rightClick)
 				return
 			end
 			self.activeWindowId = btn.windowId
-			RENDER.stopFlashing(btn.windowId)
+			FLASH.stopFlashing(btn.windowId)
 			if self._btnBgElements then
 				for wid, bgIdx in pairs(self._btnBgElements) do
 					local c = (wid == btn.windowId) and self.config.activeButtonColor or self.config.buttonColor
@@ -141,7 +141,7 @@ function OBJ:_renderPopupMenu(items)
 	canvas:appendElements({
 		type = "rectangle",
 		frame = { x = 0, y = 0, w = MENU_W, h = MENU_H },
-		fillColor = { red = 0.15, green = 0.15, blue = 0.17, alpha = 0.97 },
+		fillColor = COLOR(CFG.menuBgColor),
 		strokeColor = { red = 0.35, green = 0.35, blue = 0.40, alpha = 0.8 },
 		strokeWidth = 1,
 		roundedRectRadii = { xRadius = 5, yRadius = 5 },
@@ -182,18 +182,7 @@ function OBJ:_renderPopupMenu(items)
 	self._menuCanvas = canvas
 
 	local function closeMenu()
-		if self._menuCanvas then
-			self._menuCanvas:delete()
-			self._menuCanvas = nil
-		end
-		if self._menuEventTap then
-			self._menuEventTap:stop()
-			self._menuEventTap = nil
-		end
-		if self._menuKeyTap then
-			self._menuKeyTap:stop()
-			self._menuKeyTap = nil
-		end
+		self:_closeMenus()
 		if self._needsRebuild then
 			self._needsRebuild = nil
 			self:buildSidebar()
@@ -221,16 +210,12 @@ function OBJ:_renderPopupMenu(items)
 				if row then
 					local rowY = PAD_Y + (row - 1) * ROW_H
 					canvas:elementAttribute(HIGHLIGHT_IDX, "frame", { x = 3, y = rowY, w = MENU_W - 6, h = ROW_H })
-					canvas:elementAttribute(
-						HIGHLIGHT_IDX,
-						"fillColor",
-						{ red = 0.25, green = 0.4, blue = 0.6, alpha = 0.85 }
-					)
+					canvas:elementAttribute(HIGHLIGHT_IDX, "fillColor", COLOR(CFG.menuHighlightColor))
 				else
 					canvas:elementAttribute(
 						HIGHLIGHT_IDX,
 						"fillColor",
-						{ red = 0.25, green = 0.4, blue = 0.6, alpha = 0 }
+						COLOR({ red = 0.25, green = 0.4, blue = 0.6, alpha = 0 })
 					)
 				end
 				return false
@@ -307,7 +292,7 @@ function OBJ:_setupSidebarClickTap()
 		end
 		local mouse = e:location()
 		if RECT_CONTAINS(sf, mouse.x, mouse.y) then
-			if not RENDER.isSidebarClickAllowed() then
+			if not isSidebarClickAllowed() then
 				return false
 			end
 			local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
@@ -352,7 +337,7 @@ function OBJ:_setupDragTap()
 		local mouse = e:location()
 
 		if RECT_CONTAINS(sf, mouse.x, mouse.y) then
-			if not RENDER.isSidebarClickAllowed() then
+			if not isSidebarClickAllowed() then
 				return false
 			end
 

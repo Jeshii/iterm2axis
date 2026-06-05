@@ -25,6 +25,32 @@ function OBJ:layoutFrames(screenFrame, anchorFrame)
 	}
 end
 
+function OBJ:findWindowScreen(wins)
+	if #wins == 0 then
+		return hs.screen.mainScreen()
+	end
+	local win = wins[1]
+	local wf = win:frame()
+	local winCenter = { x = wf.x + wf.w / 2, y = wf.y + wf.h / 2 }
+	for _, screen in ipairs(hs.screen.allScreens()) do
+		local sf = screen:frame()
+		if winCenter.x >= sf.x and winCenter.x < sf.x + sf.w and winCenter.y >= sf.y and winCenter.y < sf.y + sf.h then
+			return screen
+		end
+	end
+	return hs.screen.mainScreen()
+end
+
+function OBJ:getScreen()
+	if self._currentScreen then
+		return self._currentScreen
+	end
+	local wins = CACHE.getITermWindows()
+	local screen = self:findWindowScreen(wins)
+	self._currentScreen = screen
+	return screen
+end
+
 function OBJ:getSidebarAnchor()
 	if self._pendingSidebarFrame then
 		return self._pendingSidebarFrame
@@ -122,7 +148,7 @@ function OBJ:bringWindowToFront(windowId)
 	if not win then
 		return
 	end
-	RENDER.stopFlashing(windowId)
+	FLASH.stopFlashing(windowId)
 	self.activeWindowId = windowId
 
 	if self.sidebarCanvas and self._btnBgElements then
@@ -165,9 +191,9 @@ function OBJ:syncCanvasLevel()
 	end
 end
 
-function _syncOrderedIds()
-	if not OBJ._orderedWindowIds then
-		OBJ._orderedWindowIds = {}
+function OBJ:_syncOrderedIds()
+	if not self._orderedWindowIds then
+		self._orderedWindowIds = {}
 	end
 
 	local wins = CACHE.getITermWindows()
@@ -178,7 +204,7 @@ function _syncOrderedIds()
 
 	local filtered = {}
 	local filteredSet = {}
-	for _, id in ipairs(OBJ._orderedWindowIds) do
+	for _, id in ipairs(self._orderedWindowIds) do
 		if liveIds[id] then
 			table.insert(filtered, id)
 			filteredSet[id] = true
@@ -189,12 +215,12 @@ function _syncOrderedIds()
 			table.insert(filtered, win:id())
 		end
 	end
-	OBJ._orderedWindowIds = filtered
+	self._orderedWindowIds = filtered
 	return filtered
 end
 
 function OBJ:moveWindowById(windowId, direction)
-	local filtered = _syncOrderedIds()
+	local filtered = self:_syncOrderedIds()
 	if #filtered < 2 then
 		return
 	end
@@ -224,7 +250,7 @@ function OBJ:moveWindowById(windowId, direction)
 end
 
 function OBJ:moveWindowToExtent(windowId, extent)
-	local filtered = _syncOrderedIds()
+	local filtered = self:_syncOrderedIds()
 	if #filtered < 2 then
 		return
 	end
@@ -259,7 +285,7 @@ function OBJ:focusNextWindow(direction)
 		return
 	end
 
-	_syncOrderedIds()
+	self:_syncOrderedIds()
 	if #self._orderedWindowIds == 0 then
 		return
 	end

@@ -26,7 +26,7 @@ function RENDER.sidebarStateSnapshot(wins, activeId, opencodeData)
 	for _, win in ipairs(wins) do
 		local id = win:id()
 		local fullPath = CACHE.wc(id).wd or ""
-		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
+		local claudeAgent = fullPath and CACHE._claudeAgentsData[fullPath]
 		local ti = CACHE.wc(id).tabInfo
 		local tabInfoStr = ti
 				and table.concat({
@@ -42,7 +42,7 @@ function RENDER.sidebarStateSnapshot(wins, activeId, opencodeData)
 				win:title() or "",
 				tabInfoStr,
 				tostring(id == activeId),
-				tostring(RENDER.claudeState(win) or ""),
+				tostring(FLASH.claudeState(win) or ""),
 				tostring(fullPath),
 				tostring(CACHE.wc(id).branch or ""),
 				tostring(CACHE.wc(id).wsName or ""),
@@ -68,12 +68,12 @@ function RENDER.line3Display(wd)
 	elseif wd.wsName then
 		return {
 			text = "⎇ ws:" .. wd.wsName,
-			color = { red = 0.9, green = 0.75, blue = 0.4, alpha = 0.9 },
+			color = CFG.wsNameColor,
 		}
 	elseif wd.branch then
 		return {
 			text = "⎇ " .. wd.branch,
-			color = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
+			color = CFG.branchColor,
 		}
 	end
 	return nil
@@ -93,8 +93,8 @@ function RENDER.makeTabLabel(tabInfo)
 	return before .. tabInfo.tabName .. after
 end
 
-HEADER_COLOR = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 }
-DETAIL_COLOR = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 }
+local HEADER_COLOR = { red = 0.6, green = 0.6, blue = 0.9, alpha = 0.85 }
+local DETAIL_COLOR = { red = 0.75, green = 0.75, blue = 0.8, alpha = 0.85 }
 
 function RENDER.buildTextRows(wd)
 	local dfs = CFG.defaultFontSize
@@ -206,8 +206,8 @@ function OBJ:_gatherWindowData(orderedWins)
 		local parts = PARSE_TITLE_COMPONENTS(rawTitle)
 		_fetchWindowInfo(win)
 		local fullPath = CACHE.wc(winId).wd
-		local claudeAgent = fullPath and _claudeAgentsData[fullPath]
-		local state = RENDER.claudeState(win)
+		local claudeAgent = fullPath and CACHE._claudeAgentsData[fullPath]
+		local state = FLASH.claudeState(win)
 		if claudeAgent and claudeAgent.status and claudeAgent.status ~= "idle" then
 			if claudeAgent.status == "waiting" then
 				state = "waiting"
@@ -276,8 +276,8 @@ function OBJ:_gatherWindowData(orderedWins)
 	return winData
 end
 
-PAD_TOP = 5
-GAP = 3
+local PAD_TOP = 5
+local GAP = 3
 
 function RENDER.computeTextArea(textW, rows)
 	local areas = {}
@@ -318,7 +318,7 @@ function OBJ:_renderFullSidebar(sb, winData, structureSnap, btnH)
 	self.sidebarCanvas:appendElements({
 		type = "rectangle",
 		frame = { x = sb.w - 1, y = 0, w = 1, h = sb.h },
-		fillColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
+		fillColor = COLOR(CFG.borderColor),
 		strokeWidth = 0,
 	})
 

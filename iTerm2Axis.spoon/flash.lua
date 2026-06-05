@@ -5,7 +5,7 @@ _flashState = {}
 _flashNormalColor = {}
 _flashType = {}
 
-function RENDER.claudeState(win)
+function FLASH.claudeState(win)
 	local title = win:title() or ""
 	local stripped = title:gsub("^🔔", "")
 	if stripped:match("^✳") then
@@ -20,15 +20,15 @@ function RENDER.claudeState(win)
 	return nil
 end
 
-function RENDER.flashIntervalForType(flashType)
+function FLASH.flashIntervalForType(flashType)
 	return (flashType == "bell") and CFG.bell.flashInterval or CFG.claudecode.flashInterval
 end
 
-function RENDER.minActiveFlashInterval()
+function FLASH.minActiveFlashInterval()
 	local minInterval = math.huge
 	for wid in pairs(_flashingWindows) do
 		local ft = _flashType[wid] or "waiting"
-		local interval = RENDER.flashIntervalForType(ft)
+		local interval = FLASH.flashIntervalForType(ft)
 		if interval < minInterval then
 			minInterval = interval
 		end
@@ -42,12 +42,11 @@ function _adjustFlashTimer()
 			_sharedFlashTimer:stop()
 			_sharedFlashTimer = nil
 			_currentFlashInterval = nil
-			_currentFlashInterval = nil
 		end
 		return
 	end
 
-	local newInterval = RENDER.minActiveFlashInterval()
+	local newInterval = FLASH.minActiveFlashInterval()
 	if not _sharedFlashTimer or newInterval ~= _currentFlashInterval then
 		if _sharedFlashTimer then
 			_sharedFlashTimer:stop()
@@ -70,7 +69,7 @@ function _adjustFlashTimer()
 	end
 end
 
-function RENDER.startFlashing(winId, flashType)
+function FLASH.startFlashing(winId, flashType)
 	if _flashingWindows[winId] then
 		return
 	end
@@ -83,7 +82,7 @@ function RENDER.startFlashing(winId, flashType)
 	_adjustFlashTimer()
 end
 
-function RENDER.stopFlashing(winId)
+function FLASH.stopFlashing(winId)
 	_flashingWindows[winId] = nil
 	_flashState[winId] = nil
 	_flashType[winId] = nil
