@@ -1,5 +1,8 @@
 ## 2026-06-05
 
+- **Attempts to fix sidebar cache corruption during Claude Code spinner animation** — CC's dynamic spinner frames (braille U+2800-U+28FF) in the window title lacked the `✳`/`·`/`🔔` prefix, so `windowTitleChanged` treated them as real navigation events, calling `CACHE.invalidateWindow` which wiped `wd`/`tabInfo` before the async AppleScript could re-populate them. The AppleScript then failed because the spinner-frame title didn't match any iTerm window name. Replaced the fragile CC-prefix-based invalidation gate with a `stableCore()` comparison — strips all stable CC decorations (`✳`, `·`, `🔔`, braille U+2800-U+28FF, trailing resolution suffix) and only invalidates when the meaningful path portion actually changed.
+  * None of this actually helped
+
 - **Attempts to fix sidebar button flickering during Claude Code thinking** — Claude resets the terminal title to its base form between prefix transitions (`✳ /path` → `/path` → `· /path`). This triggered two bugs in `windowTitleChanged`:
   1. The intermediate `/path` lacks a CC prefix, so the handler treated it as a real navigation, calling `FLASH.stopFlashing` (resetting button color to blue) and scheduling a stale rebuild — despite the cache being intact. Fixed by storing `lastRawTitle` per-window and `return`-ing early when the stripped previous title matches the current non-CC title, skipping ALL flash changes and rebuilds for transient resets.
   2. The `·` (busy) state fell through to the `else` catch-all which called `stopFlashing` with the normal (blue) color instead of busyColor (green) from agents data. Added an explicit `elseif state == "busy"` that stops flashing but schedules a rebuild so `_gatherWindowData` renders the correct `busyColor`.

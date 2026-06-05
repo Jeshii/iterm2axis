@@ -133,6 +133,14 @@ function OBJ:_rebuildAfterSettle(tileWhenHidden)
 	end)
 end
 
+local function stableCore(t)
+	return (t or "")
+		:gsub("^[✳·%s]+", "")
+		:gsub("\226[\160-\163][\128-\191]", "")
+		:gsub("%s*[—–-]%s*%d+✕%d+%s*$", "")
+		:gsub("^%s*(.-)%s*$", "%1")
+end
+
 function OBJ:_setupWindowWatcher()
 	self._winWatcher:subscribe("windowCreated", function(win)
 		if win then
@@ -175,14 +183,17 @@ function OBJ:_setupWindowWatcher()
 			isCCStateChange = stripped:match("^✳") or stripped:match("^·")
 			isBellStateChange = title:match("^🔔")
 			if not isCCStateChange and not isBellStateChange then
-				local prevStripped = (CACHE.wc(id).lastRawTitle or ""):gsub("^[✳·]%s*", ""):gsub("^🔔", "")
-				if prevStripped == title then
-					-- Transient CC reset (e.g. ✳ /path → /path → · /path):
-					-- skip all flash changes and buildSidebar to avoid
-					-- stopFlashing stomping the button color back to blue.
-					return
+				local prevCore = stableCore(CACHE.wc(id).lastRawTitle or "")
+				local newCore = stableCore(title)
+				if newCore == prevCore then
+					if not title:match("^[✳·🔔]") then
+						-- Transient CC reset: core unchanged, all decorations
+						-- dropped. Skip flash/rebuild to avoid stomping state.
+						return
+					end
+				else
+					CACHE.invalidateWindow(id, { "wd", "tabInfo", "tabPending", "hostname", "branch", "wsName" })
 				end
-				CACHE.invalidateWindow(id, { "wd", "tabInfo", "tabPending", "hostname", "branch", "wsName" })
 			end
 			CACHE.wc(id).lastRawTitle = title
 			local focusedWin = hs.window.focusedWindow()
