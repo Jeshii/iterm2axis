@@ -4,10 +4,10 @@ A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floatin
 
 ## Features
 
-- Floating sidebar (configurable left/right) showing all open iTerm2 windows — labeled by hostname (remote), current directory (local), or custom rename
+- Floating sidebar (configurable left/right) showing all open iTerm2 windows — labeled by tab name, hostname (remote), or current directory (local)
 - Click any window button to bring it to the front
 - Keyboard navigation to cycle focus between windows
-- Right-click any window for a context menu: Rename, Reorder, Refresh, Show/Hide Axis, Swap Side; right-click empty sidebar area for global menu
+- Right-click any window for a context menu: Reorder, Refresh, Show/Hide Axis, Swap Side; right-click empty sidebar area for global menu
 - Drag a tab over a sidebar button to bring that window to front (green highlight) — merge tabs across windows
 - Configurable start hidden, swap sidebar side at runtime
 - Auto-refreshes on window open/close/title change and screen layout changes
@@ -25,7 +25,6 @@ spoon.iTerm2Axis:bindHotkeys({
     toggle       = {{"cmd", "shift"}, "B"},
     newWindow    = {{"cmd", "shift"}, "N"},
     refresh      = {{"cmd", "shift"}, "R"},
-    renameWindow = {{"cmd", "shift"}, "E"},
     moveUp       = {{"cmd", "shift"}, "up"},
     moveDown     = {{"cmd", "shift"}, "down"},
     moveToTop    = {{"cmd", "shift", "alt"}, "up"},
@@ -62,7 +61,6 @@ All hotkeys have built-in defaults but **are only registered when you call `bind
 | ⌘⇧B | `toggle` | Show / hide the Axis sidebar |
 | ⌘⇧N | `newWindow` | Open a new iTerm2 window |
 | ⌘⇧R | `refresh` | Force-refresh the layout |
-| ⌘⇧E | `renameWindow` | Rename the active window |
 | ⌘⇧↑ | `moveUp` | Move active window up the sidebar |
 | ⌘⇧↓ | `moveDown` | Move active window down the sidebar |
 | ⌘⇧⌥↑ | `moveToTop` | Move active window to top of sidebar |
@@ -97,17 +95,19 @@ Available options (all optional — defaults are used for anything omitted):
 ```lua
 spoon.iTerm2Axis.config = {
     sidebarWidth = 200,
+    defaultFontSize = 15,
     sidebarSide = "left",             -- "left" or "right"
     startHidden = false,              -- start with sidebar hidden
+    settleDelay = 0.3,               -- debounce delay for layout rebuilds
     sidebarColor = {red=0.12, green=0.12, blue=0.14, alpha=0.95},
     buttonColor = {red=0.2, green=0.2, blue=0.22, alpha=1},
     activeButtonColor = {red=0.25, green=0.4, blue=0.6, alpha=1},
     dragHighlightColor = {red=0.3, green=0.7, blue=0.4, alpha=0.9},
+    busyColor = {red=0.3, green=0.6, blue=0.35, alpha=1},
+    waitingFlashColor = {red=0.9, green=0.6, blue=0.4, alpha=0.85},
+    prColor = {red=0.85, green=0.6, blue=0.9, alpha=0.95},
     textColor = {red=0.9, green=0.9, blue=0.9, alpha=1},
-    windowButtonHeight = 90,
     padding = 8,
-    font = ".AppleSystemUIFont",
-    fontSize = 13,
     debug = false,
     opencode = {
         enabled = true,
