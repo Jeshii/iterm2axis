@@ -29,7 +29,10 @@ function FLASH.flashState(winId)
 end
 
 function FLASH.reset()
-	_sharedFlashTimer = nil
+	if _sharedFlashTimer then
+		_sharedFlashTimer:stop()
+		_sharedFlashTimer = nil
+	end
 	_currentFlashInterval = nil
 	_flashingWindows = {}
 	_flashState = {}
