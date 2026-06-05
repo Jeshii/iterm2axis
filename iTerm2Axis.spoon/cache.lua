@@ -71,6 +71,8 @@ function RECT_CONTAINS(rect, x, y)
 	return rect and x >= rect.x and x <= rect.x + rect.w and y >= rect.y and y <= rect.y + rect.h
 end
 
+CACHE.MISSING = false
+
 CACHE.winCache = {}
 
 function CACHE.wc(winId)

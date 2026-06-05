@@ -336,15 +336,7 @@ function OBJ:stop()
 	CACHE.iTermWindowsCache = nil
 	CACHE.iTermWindowsCacheTime = 0
 	CACHE.winCache = {}
-	if _sharedFlashTimer then
-		_sharedFlashTimer:stop()
-		_sharedFlashTimer = nil
-		_currentFlashInterval = nil
-	end
-	_flashingWindows = {}
-	_flashState = {}
-	_flashNormalColor = {}
-	_flashType = {}
+	FLASH.reset()
 	self._opencodePending = false
 	if self._opencodePollTimer then
 		self._opencodePollTimer:stop()
@@ -398,12 +390,7 @@ function OBJ:init()
 	CACHE.iTermWindowsCache = nil
 	CACHE.iTermWindowsCacheTime = 0
 	CACHE.winCache = {}
-	_sharedFlashTimer = nil
-	_currentFlashInterval = nil
-	_flashingWindows = {}
-	_flashState = {}
-	_flashNormalColor = {}
-	_flashType = {}
+	FLASH.reset()
 	self._dragWatchTap = nil
 	self._dragActive = false
 	self._lastDragHoverId = nil

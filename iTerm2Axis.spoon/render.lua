@@ -199,6 +199,7 @@ end
 
 function OBJ:_gatherWindowData(orderedWins)
 	local winData = {}
+	local focusedWin = hs.window.focusedWindow()
 	for i, win in ipairs(orderedWins) do
 		local winId = win:id()
 		local isActive = (winId == self.activeWindowId)
@@ -215,10 +216,9 @@ function OBJ:_gatherWindowData(orderedWins)
 				state = "busy"
 			end
 		end
-		local focusedWin = hs.window.focusedWindow()
 		local isFocused = focusedWin and focusedWin:id() == winId
 		local isDragHover = self._dragActive and (winId == self._lastDragHoverId)
-		local btnColor = RENDER.windowStatusColor(state, isActive, isDragHover, _flashState[winId], isFocused)
+		local btnColor = RENDER.windowStatusColor(state, isActive, isDragHover, FLASH.flashState(winId), isFocused)
 
 		local prFromTitle = PARSE_PR_FROM_TITLE(rawTitle)
 		if prFromTitle and prFromTitle <= 0 then
@@ -405,7 +405,9 @@ function OBJ:_doBuildSidebar()
 	local sb = self:layoutFrames(self:getScreen():frame(), self:getSidebarAnchor()).sidebar
 
 	local structureSnap = RENDER.sidebarStructureSnapshot(wins, sb.w, sb.h)
-	local shouldShowAndTile = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
+	-- True on first render or when window count/sidebar size changes;
+	-- false on state-only changes so we skip retiling.
+	local needsRetile = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
 
 	local orderedWins = self:_orderedWindows(wins)
 	local winData = self:_gatherWindowData(orderedWins)
@@ -423,7 +425,7 @@ function OBJ:_doBuildSidebar()
 	self:syncCanvasLevel()
 	self.sidebarCanvas:show()
 	self._sidebarVisible = true
-	if shouldShowAndTile and self._sidebarEnabled and not self._skipTileOnThisBuild then
+	if needsRetile and self._sidebarEnabled and not self._skipTileOnThisBuild then
 		self:tileITermWindows(sb)
 	end
 	self._skipTileOnThisBuild = false

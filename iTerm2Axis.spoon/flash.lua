@@ -1,9 +1,9 @@
-_sharedFlashTimer = nil
-_currentFlashInterval = nil
-_flashingWindows = {}
-_flashState = {}
-_flashNormalColor = {}
-_flashType = {}
+local _sharedFlashTimer = nil
+local _currentFlashInterval = nil
+local _flashingWindows = {}
+local _flashState = {}
+local _flashNormalColor = {}
+local _flashType = {}
 
 function FLASH.claudeState(win)
 	local title = win:title() or ""
@@ -24,6 +24,19 @@ function FLASH.flashIntervalForType(flashType)
 	return (flashType == "bell") and CFG.bell.flashInterval or CFG.claudecode.flashInterval
 end
 
+function FLASH.flashState(winId)
+	return _flashState[winId]
+end
+
+function FLASH.reset()
+	_sharedFlashTimer = nil
+	_currentFlashInterval = nil
+	_flashingWindows = {}
+	_flashState = {}
+	_flashNormalColor = {}
+	_flashType = {}
+end
+
 function FLASH.minActiveFlashInterval()
 	local minInterval = math.huge
 	for wid in pairs(_flashingWindows) do
@@ -36,7 +49,7 @@ function FLASH.minActiveFlashInterval()
 	return minInterval
 end
 
-function _adjustFlashTimer()
+local function _adjustFlashTimer()
 	if not next(_flashingWindows) then
 		if _sharedFlashTimer then
 			_sharedFlashTimer:stop()

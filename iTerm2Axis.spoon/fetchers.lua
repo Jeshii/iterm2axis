@@ -70,10 +70,10 @@ function _fetchWindowInfo(win)
 			end
 
 			if not CACHE.wc(winId).tabInfo then
-				CACHE.wc(winId).tabInfo = false
+				CACHE.wc(winId).tabInfo = CACHE.MISSING
 			end
-			CACHE.wc(winId).wd = (path and path ~= "") and path or false
-			CACHE.wc(winId).hostname = (hostname and hostname ~= "") and hostname or false
+			CACHE.wc(winId).wd = (path and path ~= "") and path or CACHE.MISSING
+			CACHE.wc(winId).hostname = (hostname and hostname ~= "") and hostname or CACHE.MISSING
 
 			if OBJ.sidebarCanvas and OBJ._sidebarEnabled then
 				OBJ:buildSidebar()
@@ -114,9 +114,9 @@ function GET_GIT_BRANCH_FOR_PATH(path, winId)
 								ws = nil
 							end
 						end
-						CACHE.wc(winId).branch = (b and b ~= "") and b or false
+						CACHE.wc(winId).branch = (b and b ~= "") and b or CACHE.MISSING
 						local wsLeaf = ws and ws:match("([^/]+)%s*$")
-						CACHE.wc(winId).wsName = (wsLeaf and wsLeaf ~= "") and wsLeaf or false
+						CACHE.wc(winId).wsName = (wsLeaf and wsLeaf ~= "") and wsLeaf or CACHE.MISSING
 						hs.timer.doAfter(0, function()
 							if OBJ.sidebarCanvas and OBJ._sidebarEnabled then
 								OBJ:buildSidebar()
@@ -139,8 +139,8 @@ function GET_GIT_BRANCH_FOR_PATH(path, winId)
 				return
 			end
 			CACHE.wc(winId).brPending = nil
-			CACHE.wc(winId).branch = (branch and branch ~= "") and branch or false
-			CACHE.wc(winId).wsName = false
+			CACHE.wc(winId).branch = (branch and branch ~= "") and branch or CACHE.MISSING
+			CACHE.wc(winId).wsName = CACHE.MISSING
 			hs.timer.doAfter(0, function()
 				if OBJ.sidebarCanvas and OBJ._sidebarEnabled then
 					OBJ:buildSidebar()
@@ -193,7 +193,9 @@ function OBJ:fetchClaudeAgentsData()
 					end
 				end
 			end
-			CACHE._claudeAgentsData = newData
+			if next(newData) then
+				CACHE._claudeAgentsData = newData
+			end
 			if self.sidebarCanvas and self._sidebarEnabled then
 				self:buildSidebar()
 			end
