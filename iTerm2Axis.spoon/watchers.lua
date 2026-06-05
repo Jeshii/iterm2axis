@@ -235,7 +235,7 @@ function OBJ:_setupWindowWatcher()
 					self.sidebarCanvas:elementAttribute(bgIdx, "fillColor", COLOR(c))
 				end
 			end
-			CACHE.invalidateWindow(winId, { "tabInfo", "tabPending", "hostname" })
+			CACHE.invalidateWindow(winId, { "hostname" })
 			FETCH_WINDOW_INFO(win)
 			hs.timer.doAfter(0.05, function()
 				self:syncCanvasLevel()
