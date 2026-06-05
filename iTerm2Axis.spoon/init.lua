@@ -30,6 +30,7 @@ obj.config = {
 	activeButtonColor = { red = 0.25, green = 0.4, blue = 0.6, alpha = 1 },
 	textColor = { red = 0.9, green = 0.9, blue = 0.9, alpha = 1 },
 	dragHighlightColor = { red = 0.3, green = 0.7, blue = 0.4, alpha = 0.9 },
+	busyColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 },
 	waitingFlashColor = { red = 0.9, green = 0.6, blue = 0.4, alpha = 0.85 },
 	prColor = { red = 0.85, green = 0.6, blue = 0.9, alpha = 0.95 },
 
@@ -1020,7 +1021,7 @@ function obj:_gatherWindowData(orderedWins)
 		elseif state == "bell" and _flashState[winId] and not isFocused then
 			btnColor = cfg.bell.flashColor
 		elseif state == "busy" then
-			btnColor = { red = 0.3, green = 0.6, blue = 0.35, alpha = 1 }
+			btnColor = cfg.busyColor
 		elseif isActive then
 			btnColor = cfg.activeButtonColor
 		else
