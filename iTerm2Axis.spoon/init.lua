@@ -259,6 +259,7 @@ function OBJ:start()
 	self:_restorePersistedState()
 	self:_setupScreenWatcher()
 	self:_setupSpaceWatcher()
+	self:_setupSleepWatcher()
 
 	self._sidebarVisible = not self.config.startHidden
 	self:buildSidebar()
@@ -308,6 +309,10 @@ function OBJ:stop()
 	if self._spaceWatcher then
 		self._spaceWatcher:stop()
 		self._spaceWatcher = nil
+	end
+	if self._sleepWatcher then
+		self._sleepWatcher:stop()
+		self._sleepWatcher = nil
 	end
 	for _, w in pairs(self._windowWatchers or {}) do
 		w:stop()
@@ -394,6 +399,7 @@ function OBJ:init()
 	self._dragWatchTap = nil
 	self._dragActive = false
 	self._lastDragHoverId = nil
+	self._sleepWatcher = nil
 	return self
 end
 

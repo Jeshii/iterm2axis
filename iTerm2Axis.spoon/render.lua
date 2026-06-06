@@ -382,59 +382,71 @@ function OBJ:_doBuildSidebar()
 	end
 	self._buildPending = true
 
-	self:_closeMenus()
+	local ok = pcall(function()
+		self:_closeMenus()
 
-	local wins = CACHE.getITermWindows()
+		local wins = CACHE.getITermWindows()
 
-	if #wins == 0 then
+		if #wins == 0 then
+			if self.sidebarCanvas then
+				self.sidebarCanvas:hide()
+				self._sidebarVisible = false
+			end
+			return
+		end
+
+		local snap = RENDER.sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData)
+		if snap == self._lastSidebarSnapshot then
+			return
+		end
+		self._lastSidebarSnapshot = snap
+
+		local sb = self:layoutFrames(self:getScreen():frame(), self:getSidebarAnchor()).sidebar
+
+		local structureSnap = RENDER.sidebarStructureSnapshot(wins, sb.w, sb.h)
+		-- True on first render or when window count/sidebar size changes;
+		-- false on state-only changes so we skip retiling.
+		local needsRetile = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
+
+		local orderedWins = self:_orderedWindows(wins)
+		local winData = self:_gatherWindowData(orderedWins)
+		local maxNumRows = 1
+		for _, wd in ipairs(winData) do
+			if #wd.textRows > maxNumRows then
+				maxNumRows = #wd.textRows
+			end
+		end
+		local btnH = RENDER.computeBtnHeight(maxNumRows, CFG.defaultFontSize)
+
+		self:_renderFullSidebar(sb, winData, structureSnap, btnH)
+
+		self:syncCanvasLevel()
+		self.sidebarCanvas:show()
+		self._sidebarVisible = true
+		if needsRetile and self._sidebarEnabled and not self._skipTileOnThisBuild then
+			self:tileITermWindows(sb)
+		end
+		self._skipTileOnThisBuild = false
+		if self._swapInProgress then
+			self._swapInProgress = false
+			hs.alert.show(ACTION_LABELS.swapSide .. " Completed")
+		end
+		if self._refreshInProgress then
+			self._refreshInProgress = false
+			hs.alert.show(ACTION_LABELS.refresh .. " Completed")
+		end
+	end)
+
+	if not ok then
 		if self.sidebarCanvas then
-			self.sidebarCanvas:hide()
-			self._sidebarVisible = false
+			self.sidebarCanvas:delete()
+			self.sidebarCanvas = nil
 		end
-		self._buildPending = false
-		return
+		self._lastSidebarSnapshot = nil
+		self._lastStructureSnapshot = nil
+		self._buttonFrames = {}
+		self._btnBgElements = {}
 	end
-
-	local snap = RENDER.sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData)
-	if snap == self._lastSidebarSnapshot then
-		self._buildPending = false
-		return
-	end
-	self._lastSidebarSnapshot = snap
-
-	local sb = self:layoutFrames(self:getScreen():frame(), self:getSidebarAnchor()).sidebar
-
-	local structureSnap = RENDER.sidebarStructureSnapshot(wins, sb.w, sb.h)
-	-- True on first render or when window count/sidebar size changes;
-	-- false on state-only changes so we skip retiling.
-	local needsRetile = (self.sidebarCanvas == nil) or (structureSnap ~= self._lastStructureSnapshot)
-
-	local orderedWins = self:_orderedWindows(wins)
-	local winData = self:_gatherWindowData(orderedWins)
-	local maxNumRows = 1
-	for _, wd in ipairs(winData) do
-		if #wd.textRows > maxNumRows then
-			maxNumRows = #wd.textRows
-		end
-	end
-	local btnH = RENDER.computeBtnHeight(maxNumRows, CFG.defaultFontSize)
-
-	self:_renderFullSidebar(sb, winData, structureSnap, btnH)
 
 	self._buildPending = false
-	self:syncCanvasLevel()
-	self.sidebarCanvas:show()
-	self._sidebarVisible = true
-	if needsRetile and self._sidebarEnabled and not self._skipTileOnThisBuild then
-		self:tileITermWindows(sb)
-	end
-	self._skipTileOnThisBuild = false
-	if self._swapInProgress then
-		self._swapInProgress = false
-		hs.alert.show(ACTION_LABELS.swapSide .. " Completed")
-	end
-	if self._refreshInProgress then
-		self._refreshInProgress = false
-		hs.alert.show(ACTION_LABELS.refresh .. " Completed")
-	end
 end

@@ -134,10 +134,10 @@ function OBJ:_rebuildAfterSettle(tileWhenHidden)
 end
 
 local function stableCore(t)
-    return (t or "")
-        :gsub("^[^\x20-\x7e/~]+", "")   -- strip any leading non-ASCII/non-path chars (spinners, bullets, etc.)
-        :gsub("%s*[—–-]%s*%d+✕%d+%s*$", "")
-        :gsub("^%s*(.-)%s*$", "%1")
+	return (t or "")
+		:gsub("^[^\x20-\x7e/~]+", "") -- strip any leading non-ASCII/non-path chars (spinners, bullets, etc.)
+		:gsub("%s*[—–-]%s*%d+✕%d+%s*$", "")
+		:gsub("^%s*(.-)%s*$", "%1")
 end
 
 function OBJ:_setupWindowWatcher()
@@ -297,6 +297,40 @@ function OBJ:_restorePersistedState()
 	end
 end
 
+function OBJ:_setupSleepWatcher()
+	if self._sleepWatcher then
+		self._sleepWatcher:stop()
+	end
+	self._sleepWatcher = hs.caffeinate.watcher.new(function(event)
+		if event == hs.caffeinate.watcher.wake then
+			hs.timer.doAfter(self.config.settleDelay, function()
+				self:refreshSleepWake()
+			end)
+		end
+	end)
+	self._sleepWatcher:start()
+end
+
+function OBJ:refreshSleepWake()
+	if not self._sidebarEnabled then
+		return
+	end
+	self._pendingSidebarFrame = nil
+	self._currentScreen = nil
+	self._lastStructureSnapshot = nil
+	self._lastSidebarSnapshot = nil
+	CACHE.iTermWindowsCache = nil
+	if self.sidebarCanvas then
+		self.sidebarCanvas:delete()
+		self.sidebarCanvas = nil
+	end
+	self:_setupSidebarClickTap()
+	self:_setupDragTap()
+	if self._sidebarVisible then
+		self:buildSidebar()
+	end
+end
+
 function OBJ:_setupScreenWatcher()
 	if self._screenWatcher then
 		self._screenWatcher:stop()
@@ -305,13 +339,15 @@ function OBJ:_setupScreenWatcher()
 		hs.timer.doAfter(self.config.settleDelay, function()
 			self._pendingSidebarFrame = nil
 			self._currentScreen = nil
+			CACHE.iTermWindowsCache = nil
 			if self.sidebarCanvas then
 				self.sidebarCanvas:delete()
 				self.sidebarCanvas = nil
 			end
 			self._lastStructureSnapshot = nil
-			self._sidebarVisible = true
-			self:buildSidebar()
+			if self._sidebarVisible then
+				self:buildSidebar()
+			end
 		end)
 	end)
 	self._screenWatcher:start()
@@ -324,7 +360,7 @@ function OBJ:_setupSpaceWatcher()
 	self._spaceWatcher = hs.spaces.watcher.new(function()
 		hs.timer.doAfter(self.config.settleDelay, function()
 			self:syncCanvasLevel()
-			if self.sidebarCanvas and self._sidebarEnabled then
+			if self.sidebarCanvas and self._sidebarEnabled and self._sidebarVisible then
 				self:buildSidebar()
 			end
 		end)

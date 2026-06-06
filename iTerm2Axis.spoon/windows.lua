@@ -98,15 +98,17 @@ function OBJ:refreshLayout()
 	self._skipTileOnThisBuild = false
 	self:buildSidebar()
 	self:syncCanvasLevel()
+	self:tileITermWindows()
 end
 
 function OBJ:toggleSidebar()
-	if self.sidebarCanvas and self._sidebarVisible then
-		local sbf = self.sidebarCanvas:frame()
-		self.sidebarCanvas:hide()
+	if self._sidebarVisible then
+		if self.sidebarCanvas then
+			self.sidebarCanvas:hide()
+		end
 		self._sidebarVisible = false
-		self:tileITermWindows()
 		self._toggleLock = true
+		self:tileITermWindows()
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
 		end)
@@ -124,6 +126,7 @@ function OBJ:toggleSidebar()
 			self._currentScreen = wins[1]:screen()
 		end
 		self._sidebarVisible = true
+		self._toggleLock = true
 		self._lastStructureSnapshot = nil
 		self._lastSidebarSnapshot = nil
 		self:refreshLayout()
