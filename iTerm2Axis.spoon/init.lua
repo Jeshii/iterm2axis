@@ -211,7 +211,7 @@ function OBJ:bindHotkeys(mapping)
 	end)
 
 	hs.hotkey.bind(refreshMods, refreshKey, function()
-		self:refreshLayout()
+		self:forceRetile()
 	end)
 
 	hs.hotkey.bind(moveUpMods, moveUpKey, function()

@@ -99,7 +99,7 @@ function OBJ:showWindowMenu(windowId)
 			label = ACTION_LABELS.refresh,
 			shortcut = self._hotkeyLabels.refresh,
 			action = function()
-				self:refreshLayout()
+				self:forceRetile()
 			end,
 		},
 		{
@@ -129,7 +129,8 @@ function OBJ:_renderPopupMenu(items)
 	local MENU_H = #items * ROW_H + PAD_Y * 2
 
 	local mouse = hs.mouse.absolutePosition()
-	local screen = hs.screen.mainScreen():frame()
+	local ss = hs.screen.mainScreen() or hs.screen.primaryScreen()
+	local screen = ss:frame()
 
 	local mx = math.min(mouse.x, screen.x + screen.w - MENU_W - 4)
 	local my = math.min(mouse.y, screen.y + screen.h - MENU_H - 4)
@@ -200,48 +201,59 @@ function OBJ:_renderPopupMenu(items)
 	self._menuEventTap = hs.eventtap.new(
 		{ hs.eventtap.event.types.mouseMoved, hs.eventtap.event.types.leftMouseDown },
 		function(e)
-			local pos = e:location()
-			local lx = pos.x - mx
-			local ly = pos.y - my
-			local kind = e:getType()
+			local consumed
+			local ok, err = pcall(function()
+				local pos = e:location()
+				local lx = pos.x - mx
+				local ly = pos.y - my
+				local kind = e:getType()
 
-			if kind == hs.eventtap.event.types.mouseMoved then
-				local row = rowAtY(ly)
-				if row then
-					local rowY = PAD_Y + (row - 1) * ROW_H
-					canvas:elementAttribute(HIGHLIGHT_IDX, "frame", { x = 3, y = rowY, w = MENU_W - 6, h = ROW_H })
-					canvas:elementAttribute(HIGHLIGHT_IDX, "fillColor", COLOR(CFG.menuHighlightColor))
-				else
-					canvas:elementAttribute(
-						HIGHLIGHT_IDX,
-						"fillColor",
-						COLOR({ red = 0.25, green = 0.4, blue = 0.6, alpha = 0 })
-					)
+				if kind == hs.eventtap.event.types.mouseMoved then
+					local row = rowAtY(ly)
+					if row then
+						local rowY = PAD_Y + (row - 1) * ROW_H
+						canvas:elementAttribute(HIGHLIGHT_IDX, "frame", { x = 3, y = rowY, w = MENU_W - 6, h = ROW_H })
+						canvas:elementAttribute(HIGHLIGHT_IDX, "fillColor", COLOR(CFG.menuHighlightColor))
+					else
+						canvas:elementAttribute(
+							HIGHLIGHT_IDX,
+							"fillColor",
+							COLOR({ red = 0.25, green = 0.4, blue = 0.6, alpha = 0 })
+						)
+					end
+				elseif kind == hs.eventtap.event.types.leftMouseDown then
+					consumed = true
+					local row = rowAtY(ly)
+					if row and lx >= 0 and lx <= MENU_W then
+						local action = items[row].action
+						closeMenu()
+						action()
+					else
+						closeMenu()
+					end
 				end
-				return false
-			elseif kind == hs.eventtap.event.types.leftMouseDown then
-				local row = rowAtY(ly)
-				if row and lx >= 0 and lx <= MENU_W then
-					local action = items[row].action
-					closeMenu()
-					action()
-				else
-					closeMenu()
-				end
-				return true
+			end)
+			if not ok then
+				print("[iterm2axis] _menuEventTap error:", err)
+				closeMenu()
 			end
-
-			return false
+			return consumed or false
 		end
 	)
 	self._menuEventTap:start()
 
 	self._menuKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
-		if e:getKeyCode() == hs.keycodes.map["escape"] then
-			closeMenu()
-			return true
+		local consumed
+		local ok, err = pcall(function()
+			if e:getKeyCode() == hs.keycodes.map["escape"] then
+				closeMenu()
+				consumed = true
+			end
+		end)
+		if not ok then
+			print("[iterm2axis] _menuKeyTap error:", err)
 		end
-		return false
+		return consumed or false
 	end)
 	self._menuKeyTap:start()
 end
@@ -254,7 +266,7 @@ function OBJ:showGlobalMenu()
 			label = ACTION_LABELS.refresh,
 			shortcut = self._hotkeyLabels.refresh,
 			action = function()
-				self:refreshLayout()
+				self:forceRetile()
 			end,
 		},
 		{
@@ -283,21 +295,25 @@ function OBJ:_setupSidebarClickTap()
 		hs.eventtap.event.types.leftMouseDown,
 		hs.eventtap.event.types.rightMouseDown,
 	}, function(e)
-		if not self._sidebarVisible then
-			return false
-		end
-		local sf = self.sidebarCanvas and self.sidebarCanvas:frame()
-		if not sf then
-			return false
-		end
-		local mouse = e:location()
-		if RECT_CONTAINS(sf, mouse.x, mouse.y) then
-			if not isSidebarClickAllowed() then
-				return false
+		local ok, err = pcall(function()
+			if not self._sidebarVisible then
+				return
 			end
-			local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
-			self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, isRight)
-			return false
+			local sf = self.sidebarCanvas and self.sidebarCanvas:frame()
+			if not sf then
+				return
+			end
+			local mouse = e:location()
+			if RECT_CONTAINS(sf, mouse.x, mouse.y) then
+				if not isSidebarClickAllowed() then
+					return
+				end
+				local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
+				self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, isRight)
+			end
+		end)
+		if not ok then
+			print("[iterm2axis] _clickTap error:", err)
 		end
 		return false
 	end)

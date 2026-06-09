@@ -77,6 +77,16 @@ function OBJ:tileITermWindows(sb)
 	else
 		newFrame = screenFrame
 	end
+	print(
+		string.format(
+			"[iterm2axis] tileITermWindows: visible=%s frame={x=%.0f,y=%.0f,w=%.0f,h=%.0f}",
+			tostring(self._sidebarVisible),
+			newFrame.x,
+			newFrame.y,
+			newFrame.w,
+			newFrame.h
+		)
+	)
 	for _, win in ipairs(CACHE.getITermWindows()) do
 		win:setFrame(newFrame)
 	end
@@ -94,6 +104,7 @@ function OBJ:refreshLayout()
 		self._pendingSidebarFrame = self:layoutFrames(sf, f).sidebar
 		self._currentScreen = anchorWin:screen()
 		self._lastStructureSnapshot = nil
+		self._lastSidebarSnapshot = nil
 	end
 	self._skipTileOnThisBuild = false
 	self:buildSidebar()
@@ -108,25 +119,16 @@ function OBJ:toggleSidebar()
 		end
 		self._sidebarVisible = false
 		self._toggleLock = true
+		self._lastStructureSnapshot = nil
 		self:tileITermWindows()
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
 		end)
 		hs.alert.show(ACTION_LABELS.toggle .. " Completed")
 	else
-		local wins = CACHE.getITermWindows()
-		if #wins > 0 and self.sidebarCanvas then
-			local sbf = self.sidebarCanvas:frame()
-			self._pendingSidebarFrame = {
-				x = sbf.x,
-				y = sbf.y,
-				w = self.config.sidebarWidth,
-				h = sbf.h,
-			}
-			self._currentScreen = wins[1]:screen()
-		end
 		self._sidebarVisible = true
 		self._toggleLock = true
+		self._pendingSidebarFrame = nil
 		self._lastStructureSnapshot = nil
 		self._lastSidebarSnapshot = nil
 		self:refreshLayout()
@@ -138,12 +140,17 @@ function OBJ:toggleSidebar()
 	end
 end
 
+function OBJ:forceRetile()
+	self._lastStructureSnapshot = nil
+	self._lastSidebarSnapshot = nil
+	self._pendingSidebarFrame = nil
+	self:refreshLayout()
+end
+
 function OBJ:toggleSide()
 	self._swapInProgress = true
 	self.config.sidebarSide = (self.config.sidebarSide ~= "right") and "right" or "left"
-	self._pendingSidebarFrame = nil
-	self._lastStructureSnapshot = nil
-	self:refreshLayout()
+	self:forceRetile()
 end
 
 function OBJ:bringWindowToFront(windowId)

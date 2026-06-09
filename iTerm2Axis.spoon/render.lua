@@ -383,11 +383,10 @@ function OBJ:_doBuildSidebar()
 	self._buildPending = true
 
 	local ok = pcall(function()
-		self:_closeMenus()
-
 		local wins = CACHE.getITermWindows()
 
 		if #wins == 0 then
+			self:_closeMenus()
 			if self.sidebarCanvas then
 				self.sidebarCanvas:hide()
 				self._sidebarVisible = false
@@ -397,9 +396,13 @@ function OBJ:_doBuildSidebar()
 
 		local snap = RENDER.sidebarStateSnapshot(wins, self.activeWindowId, self._opencodeData)
 		if snap == self._lastSidebarSnapshot then
+			if CFG.debug then
+				print("[iterm2axis] _doBuildSidebar: early return (snapshot unchanged)")
+			end
 			return
 		end
 		self._lastSidebarSnapshot = snap
+		self:_closeMenus()
 
 		local sb = self:layoutFrames(self:getScreen():frame(), self:getSidebarAnchor()).sidebar
 
@@ -442,6 +445,7 @@ function OBJ:_doBuildSidebar()
 			self.sidebarCanvas:delete()
 			self.sidebarCanvas = nil
 		end
+		self._sidebarVisible = false
 		self._lastSidebarSnapshot = nil
 		self._lastStructureSnapshot = nil
 		self._buttonFrames = {}
