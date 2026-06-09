@@ -140,6 +140,14 @@ function OBJ:toggleSidebar()
 	end
 end
 
+function OBJ:toggleTiling()
+	self._tilingEnabled = not self._tilingEnabled
+	if self._tilingEnabled then
+		self:forceRetile()
+	end
+	hs.alert.show("Tiling " .. (self._tilingEnabled and "Enabled" or "Disabled"))
+end
+
 function OBJ:forceRetile()
 	self._lastStructureSnapshot = nil
 	self._lastSidebarSnapshot = nil

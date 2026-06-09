@@ -1,3 +1,7 @@
+## 2026-06-09
+
+- **Phase 1: Decouple tiling from sidebar** — added `_tilingEnabled` state variable (init'd `true`), `toggleTiling()` function, and `⌘⇧T` hotkey. No behavioral change yet — the toggle flips state and re-tiles when re-enabled, but nothing is gated behind it (Phase 2 adds the actual guards).
+
 ## 2026-06-06
 
 - **Fixed canvas unresponsive after sleep/wake** — added `hs.caffeinate.watcher` (`_setupSleepWatcher`) that re-creates the click and drag event taps and rebuilds the sidebar canvas on wake from sleep, since `hs.eventtap` instances can be silently invalidated by the system after macOS sleep. Added `refreshSleepWake()` helper that invalidates all state, re-creates event taps, and conditionally rebuilds if the sidebar was visible.
