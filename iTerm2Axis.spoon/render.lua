@@ -426,7 +426,7 @@ function OBJ:_doBuildSidebar()
 		self:syncCanvasLevel()
 		self.sidebarCanvas:show()
 		self._sidebarVisible = true
-		if needsRetile and self._sidebarEnabled and not self._skipTileOnThisBuild then
+		if needsRetile and self._tilingEnabled and not self._skipTileOnThisBuild then
 			self:tileITermWindows(sb)
 		end
 		self._skipTileOnThisBuild = false

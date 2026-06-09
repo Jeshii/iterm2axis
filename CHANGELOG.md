@@ -1,6 +1,7 @@
 ## 2026-06-09
 
 - **Phase 1: Decouple tiling from sidebar** — added `_tilingEnabled` state variable (init'd `true`), `toggleTiling()` function, and `⌘⇧T` hotkey. No behavioral change yet — the toggle flips state and re-tiles when re-enabled, but nothing is gated behind it (Phase 2 adds the actual guards).
+- **Phase 2: Gate all window frame manipulation behind `_tilingEnabled`** — `tileITermWindows()`, the `setFrame()` loop in `handleWindowMoveOrResize()`, the retile guard in `_doBuildSidebar()`, and `_rebuildAfterSettle()` all check `_tilingEnabled` before touching any window frame. Toggling tiling OFF now actually prevents window layout changes; the sidebar repositions itself to the focused window but does not resize/move any iTerm windows.
 
 ## 2026-06-06
 

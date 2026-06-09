@@ -112,8 +112,10 @@ function OBJ:handleWindowMoveOrResize()
 
 			local contentX = math.max(l.content.x, math.min(f.x, l.content.x + l.content.w - contentW))
 			local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
-			for _, w in ipairs(wins) do
-				w:setFrame(newFrame)
+			if self._tilingEnabled then
+				for _, w in ipairs(wins) do
+					w:setFrame(newFrame)
+				end
 			end
 
 			self._skipTileOnThisBuild = true
@@ -127,7 +129,7 @@ function OBJ:_rebuildAfterSettle(tileWhenHidden)
 	hs.timer.doAfter(self.config.settleDelay, function()
 		self._lastStructureSnapshot = nil
 		self:buildSidebar()
-		if tileWhenHidden and not self._sidebarVisible then
+		if tileWhenHidden and not self._sidebarVisible and self._tilingEnabled then
 			self:tileITermWindows()
 		end
 	end)

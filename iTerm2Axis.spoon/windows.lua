@@ -66,7 +66,7 @@ function OBJ:getSidebarAnchor()
 end
 
 function OBJ:tileITermWindows(sb)
-	if not self._sidebarEnabled then
+	if not self._tilingEnabled then
 		return
 	end
 	local screenFrame = self:getScreen():frame()
