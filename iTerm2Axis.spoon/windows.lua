@@ -87,9 +87,25 @@ function OBJ:tileITermWindows(sb)
 			newFrame.h
 		)
 	)
-	for _, win in ipairs(CACHE.getITermWindows()) do
-		win:setFrame(newFrame)
+	self:_withTilingGuard(function()
+		for _, win in ipairs(CACHE.getITermWindows()) do
+			if not win:isFullScreen() then
+				win:setFrame(newFrame)
+			end
+		end
+	end)
+end
+
+function OBJ:_withTilingGuard(fn)
+	self._tilingInProgress = true
+	if self._tilingClearTimer then
+		self._tilingClearTimer:stop()
 	end
+	fn()
+	self._tilingClearTimer = hs.timer.doAfter(self.config.settleDelay + 0.1, function()
+		self._tilingInProgress = false
+		self._tilingClearTimer = nil
+	end)
 end
 
 function OBJ:refreshLayout()
@@ -110,6 +126,7 @@ function OBJ:refreshLayout()
 	self:buildSidebar()
 	self:syncCanvasLevel()
 	self:tileITermWindows()
+	self._skipTileOnThisBuild = true
 end
 
 function OBJ:toggleSidebar()
@@ -124,19 +141,32 @@ function OBJ:toggleSidebar()
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
 		end)
-		hs.alert.show(ACTION_LABELS.toggle .. " Completed")
+		hs.alert.show("Sidebar Hidden")
 	else
 		self._sidebarVisible = true
 		self._toggleLock = true
 		self._pendingSidebarFrame = nil
 		self._lastStructureSnapshot = nil
 		self._lastSidebarSnapshot = nil
-		self:refreshLayout()
+
+		local wins = CACHE.getITermWindows()
+		if #wins > 0 then
+			local anchorWin = hs.window.focusedWindow()
+			if not (anchorWin and IS_ITERM(anchorWin)) then
+				anchorWin = wins[1]
+			end
+			local f = anchorWin:frame()
+			local sf = anchorWin:screen():frame()
+			self._pendingSidebarFrame = self:layoutFrames(sf, f).sidebar
+			self._currentScreen = anchorWin:screen()
+		end
+
+		self:buildSidebar()
 		self:syncCanvasLevel()
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
 		end)
-		hs.alert.show(ACTION_LABELS.toggle .. " Completed")
+		hs.alert.show("Sidebar Shown")
 	end
 end
 

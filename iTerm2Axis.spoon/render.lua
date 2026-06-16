@@ -201,77 +201,81 @@ function OBJ:_gatherWindowData(orderedWins)
 	local winData = {}
 	local focusedWin = hs.window.focusedWindow()
 	for i, win in ipairs(orderedWins) do
-		local winId = win:id()
-		local isActive = (winId == self.activeWindowId)
-		local rawTitle = win:title() or ""
-		local parts = PARSE_TITLE_COMPONENTS(rawTitle)
-		FETCH_WINDOW_INFO(win)
-		local fullPath = CACHE.wc(winId).wd
-		local claudeAgent = fullPath and CACHE._claudeAgentsData[fullPath]
-		local state = FLASH.claudeState(win)
-		if claudeAgent and claudeAgent.status and claudeAgent.status ~= "idle" then
-			if claudeAgent.status == "waiting" then
-				state = "waiting"
-			elseif claudeAgent.status == "busy" then
-				state = "busy"
-			end
-		end
-		local isFocused = focusedWin and focusedWin:id() == winId
-		local isDragHover = self._dragActive and (winId == self._lastDragHoverId)
-		local btnColor = RENDER.windowStatusColor(state, isActive, isDragHover, FLASH.flashState(winId), isFocused)
-
-		local prFromTitle = PARSE_PR_FROM_TITLE(rawTitle)
-		if prFromTitle and prFromTitle <= 0 then
-			prFromTitle = nil
-		end
-		local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
-		local branch = fullPath and GET_GIT_BRANCH_FOR_PATH(fullPath, winId) or nil
-		local wsName = CACHE.wc(winId).wsName or nil
-		local hostname = CACHE.wc(winId).hostname or parts.host
-		local tabInfo = CACHE.wc(winId).tabInfo
-		local tabName = tabInfo and tabInfo.tabName
-		local dottedLabel = tabInfo and RENDER.makeTabLabel(tabInfo)
-		local label = dottedLabel or basename or hostname or ("Window " .. i)
-
-		if tabName and basename and basename == tabName then
-			basename = nil
-		elseif not tabName and basename and basename == label then
-			basename = nil
-		end
-
-		local ocData
-		if fullPath and self._opencodeData[fullPath] then
-			ocData = self._opencodeData[fullPath]
+		if win:isFullScreen() then
+			winData[i] = nil
 		else
-			for _, data in pairs(self._opencodeData or {}) do
-				if data.title and rawTitle:find(data.title, 1, true) then
-					ocData = data
-					break
+			local winId = win:id()
+			local isActive = (winId == self.activeWindowId)
+			local rawTitle = win:title() or ""
+			local parts = PARSE_TITLE_COMPONENTS(rawTitle)
+			FETCH_WINDOW_INFO(win)
+			local fullPath = CACHE.wc(winId).wd
+			local claudeAgent = fullPath and CACHE._claudeAgentsData[fullPath]
+			local state = FLASH.claudeState(win)
+			if claudeAgent and claudeAgent.status and claudeAgent.status ~= "idle" then
+				if claudeAgent.status == "waiting" then
+					state = "waiting"
+				elseif claudeAgent.status == "busy" then
+					state = "busy"
 				end
 			end
-		end
-		winData[i] = {
-			win = win,
-			winId = winId,
-			btnColor = btnColor,
-			label = label,
-			hostname = hostname,
-			basename = basename,
-			branch = branch,
-			wsName = wsName,
-			prFromTitle = prFromTitle,
-			ocData = ocData,
-			claudeAgent = claudeAgent,
-			textRows = RENDER.buildTextRows({
+			local isFocused = focusedWin and focusedWin:id() == winId
+			local isDragHover = self._dragActive and (winId == self._lastDragHoverId)
+			local btnColor = RENDER.windowStatusColor(state, isActive, isDragHover, FLASH.flashState(winId), isFocused)
+
+			local prFromTitle = PARSE_PR_FROM_TITLE(rawTitle)
+			if prFromTitle and prFromTitle <= 0 then
+				prFromTitle = nil
+			end
+			local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
+			local branch = fullPath and GET_GIT_BRANCH_FOR_PATH(fullPath, winId) or nil
+			local wsName = CACHE.wc(winId).wsName or nil
+			local hostname = CACHE.wc(winId).hostname or parts.host
+			local tabInfo = CACHE.wc(winId).tabInfo
+			local tabName = tabInfo and tabInfo.tabName
+			local dottedLabel = tabInfo and RENDER.makeTabLabel(tabInfo)
+			local label = dottedLabel or basename or hostname or ("Window " .. i)
+
+			if tabName and basename and basename == tabName then
+				basename = nil
+			elseif not tabName and basename and basename == label then
+				basename = nil
+			end
+
+			local ocData
+			if fullPath and self._opencodeData[fullPath] then
+				ocData = self._opencodeData[fullPath]
+			else
+				for _, data in pairs(self._opencodeData or {}) do
+					if data.title and rawTitle:find(data.title, 1, true) then
+						ocData = data
+						break
+					end
+				end
+			end
+			winData[i] = {
+				win = win,
+				winId = winId,
+				btnColor = btnColor,
 				label = label,
 				hostname = hostname,
+				basename = basename,
 				branch = branch,
 				wsName = wsName,
 				prFromTitle = prFromTitle,
 				ocData = ocData,
 				claudeAgent = claudeAgent,
-			}),
-		}
+				textRows = RENDER.buildTextRows({
+					label = label,
+					hostname = hostname,
+					branch = branch,
+					wsName = wsName,
+					prFromTitle = prFromTitle,
+					ocData = ocData,
+					claudeAgent = claudeAgent,
+				}),
+			}
+		end
 	end
 	return winData
 end
@@ -377,6 +381,14 @@ function OBJ:_doBuildSidebar()
 		self._buildPending = false
 		return
 	end
+
+	if self:_isCurrentSpaceFullScreen() then
+		if self.sidebarCanvas then
+			self.sidebarCanvas:hide()
+		end
+		self._buildPending = false
+		return
+	end
 	if self._buildPending then
 		return
 	end
@@ -423,12 +435,12 @@ function OBJ:_doBuildSidebar()
 
 		self:_renderFullSidebar(sb, winData, structureSnap, btnH)
 
-		self:syncCanvasLevel()
-		self.sidebarCanvas:show()
 		self._sidebarVisible = true
 		if needsRetile and self._tilingEnabled and not self._skipTileOnThisBuild then
 			self:tileITermWindows(sb)
 		end
+		self:syncCanvasLevel()
+		self.sidebarCanvas:show()
 		self._skipTileOnThisBuild = false
 		if self._swapInProgress then
 			self._swapInProgress = false

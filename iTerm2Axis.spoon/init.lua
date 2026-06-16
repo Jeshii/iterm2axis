@@ -341,10 +341,21 @@ function OBJ:stop()
 		self._menuKeyTap:stop()
 		self._menuKeyTap = nil
 	end
+	if self._resizeDebounceTimer then
+		self._resizeDebounceTimer:stop()
+		self._resizeDebounceTimer = nil
+	end
 	if self._buildDebounceTimer then
 		self._buildDebounceTimer:stop()
 		self._buildDebounceTimer = nil
 	end
+	if self._tilingClearTimer then
+		self._tilingClearTimer:stop()
+		self._tilingClearTimer = nil
+	end
+	self._tilingInProgress = false
+	self._pendingSidebarFrame = nil
+	self._currentScreen = nil
 	CACHE.iTermWindowsCache = nil
 	CACHE.iTermWindowsCacheTime = 0
 	CACHE.winCache = {}
@@ -408,6 +419,9 @@ function OBJ:init()
 	self._dragActive = false
 	self._lastDragHoverId = nil
 	self._sleepWatcher = nil
+	self._tilingInProgress = false
+	self._tilingClearTimer = nil
+	self._fullScreenActive = false
 	return self
 end
 

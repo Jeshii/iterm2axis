@@ -9,21 +9,33 @@ function OBJ:watchWindow(win)
 	local watcher = win:newWatcher(function(element, event)
 		if event == hs.uielement.watcher.windowResized or event == hs.uielement.watcher.windowMoved then
 			self:handleWindowMoveOrResize()
+		elseif event == hs.uielement.watcher.windowFullScreen then
+			CACHE.iTermWindowsCache = nil
+			if win:isFullScreen() and self.sidebarCanvas then
+				self.sidebarCanvas:hide()
+			end
 		end
 	end, self)
 	watcher:start({
 		hs.uielement.watcher.windowResized,
 		hs.uielement.watcher.windowMoved,
+		hs.uielement.watcher.windowFullScreen,
 	})
 	self._windowWatchers[id] = watcher
 end
 
 function OBJ:handleWindowMoveOrResize()
+	if self._tilingInProgress then
+		return
+	end
 	if self._resizeDebounceTimer then
 		self._resizeDebounceTimer:stop()
 	end
 	self._resizeDebounceTimer = hs.timer.doAfter(self.config.settleDelay, function()
 		if self._toggleLock then
+			return
+		end
+		if self._tilingInProgress then
 			return
 		end
 		if not self._sidebarVisible then
@@ -82,14 +94,17 @@ function OBJ:handleWindowMoveOrResize()
 
 		local driftedWin = nil
 		for i = #wins, 1, -1 do
-			local f = wins[i]:frame()
-			if
-				math.abs(edgeFn(f) - expectedEdge) > 5
-				or math.abs(f.y - currentAnchor.y) > 5
-				or math.abs(f.h - currentAnchor.h) > 5
-			then
-				driftedWin = wins[i]
-				break
+			local w = wins[i]
+			if not w:isFullScreen() then
+				local f = w:frame()
+				if
+					math.abs(edgeFn(f) - expectedEdge) > 5
+					or math.abs(f.y - currentAnchor.y) > 5
+					or math.abs(f.h - currentAnchor.h) > 5
+				then
+					driftedWin = w
+					break
+				end
 			end
 		end
 
@@ -112,11 +127,13 @@ function OBJ:handleWindowMoveOrResize()
 
 			local contentX = math.max(l.content.x, math.min(f.x, l.content.x + l.content.w - contentW))
 			local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
-			if self._tilingEnabled then
-				for _, w in ipairs(wins) do
-					w:setFrame(newFrame)
+			self:_withTilingGuard(function()
+				if self._tilingEnabled then
+					for _, w in ipairs(wins) do
+						w:setFrame(newFrame)
+					end
 				end
-			end
+			end)
 
 			self._skipTileOnThisBuild = true
 			self._lastStructureSnapshot = nil
@@ -127,6 +144,9 @@ end
 
 function OBJ:_rebuildAfterSettle(tileWhenHidden)
 	hs.timer.doAfter(self.config.settleDelay, function()
+		if self._toggleLock then
+			return
+		end
 		self._lastStructureSnapshot = nil
 		self:buildSidebar()
 		if tileWhenHidden and not self._sidebarVisible and self._tilingEnabled then
@@ -242,6 +262,18 @@ function OBJ:_setupWindowWatcher()
 			hs.timer.doAfter(0.05, function()
 				self:syncCanvasLevel()
 			end)
+
+			if not self._tilingEnabled and self._sidebarVisible and self.sidebarCanvas then
+				local f = win:frame()
+				local sf = win:screen():frame()
+				local newPos = self:layoutFrames(sf, f).sidebar
+				local curFrame = self.sidebarCanvas:frame()
+				local dx = math.abs(newPos.x - curFrame.x)
+				local dy = math.abs(newPos.y - curFrame.y)
+				if dx > 2 or dy > 2 then
+					self.sidebarCanvas:setFrame(newPos)
+				end
+			end
 		end
 	end)
 end
@@ -304,7 +336,11 @@ function OBJ:_setupSleepWatcher()
 		self._sleepWatcher:stop()
 	end
 	self._sleepWatcher = hs.caffeinate.watcher.new(function(event)
-		if event == hs.caffeinate.watcher.wake then
+		if
+			event == hs.caffeinate.watcher.wake
+			or event == hs.caffeinate.watcher.screensDidWake
+			or event == hs.caffeinate.watcher.screensDidUnlock
+		then
 			hs.timer.doAfter(self.config.settleDelay, function()
 				self:refreshSleepWake()
 			end)
@@ -355,14 +391,50 @@ function OBJ:_setupScreenWatcher()
 	self._screenWatcher:start()
 end
 
+function OBJ:_isCurrentSpaceFullScreen()
+	if not hs.spaces or not hs.spaces.activeSpaceOnScreen or not hs.spaces.spaceType then
+		return false
+	end
+	local screen = self:getScreen()
+	if not screen then
+		return false
+	end
+	local ok, spaceID = pcall(hs.spaces.activeSpaceOnScreen, screen)
+	if not ok or not spaceID then
+		return false
+	end
+	local ok2, stype = pcall(hs.spaces.spaceType, spaceID)
+	if not ok2 or not stype then
+		return false
+	end
+	return stype == "fullscreen"
+end
+
+function OBJ:_checkFullScreenAndAdjust()
+	local nowFS = self:_isCurrentSpaceFullScreen()
+	if nowFS == self._fullScreenActive then
+		return
+	end
+	self._fullScreenActive = nowFS
+	CACHE.iTermWindowsCache = nil
+	if nowFS then
+		if self.sidebarCanvas then
+			self.sidebarCanvas:hide()
+		end
+	elseif self.sidebarCanvas and self._sidebarVisible then
+		self.sidebarCanvas:show()
+	end
+end
+
 function OBJ:_setupSpaceWatcher()
 	if self._spaceWatcher then
 		self._spaceWatcher:stop()
 	end
 	self._spaceWatcher = hs.spaces.watcher.new(function()
+		self:_checkFullScreenAndAdjust()
+		self:syncCanvasLevel()
 		hs.timer.doAfter(self.config.settleDelay, function()
-			self:syncCanvasLevel()
-			if self.sidebarCanvas and self._sidebarEnabled and self._sidebarVisible then
+			if self.sidebarCanvas and self._sidebarEnabled and self._sidebarVisible and not self._fullScreenActive then
 				self:buildSidebar()
 			end
 		end)

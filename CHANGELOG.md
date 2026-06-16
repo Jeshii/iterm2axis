@@ -1,7 +1,25 @@
+## 2026-06-16
+
+- **macOS native full-screen (green button) now hides sidebar and excludes full-screened windows from tiling** — Space watcher calls `_checkFullScreenAndAdjust()` on every Space switch; when `hs.spaces.spaceType()` returns `"fullscreen"`, the sidebar canvas is hidden (removed from full-screen Spaces for other apps and full-screened iTerm windows). `_doBuildSidebar()` also checks `_isCurrentSpaceFullScreen()` as a guard on every rebuild. Full-screened iTerm windows are filtered from `getITermWindows()` via `w:isFullScreen()`, keeping them out of the tiling pool. Option-click (Zoom/fill) is unaffected — `isFullScreen()` returns `false` and no Space change occurs.
+
+- **Added `screensDidWake` / `screensDidUnlock` to sleep watcher** — `refreshSleepWake()` now also fires when the display wakes or the user unlocks the computer (not just system sleep wake), re-creating event taps and rebuilding the sidebar to fix unresponsive clicks after sleep/lock.
+
+## 2026-06-15
+
+- **Fixed sidebar not showing on build and eliminated double-resize** — reordered `_doBuildSidebar` so that `_sidebarVisible = true` and `tileITermWindows(sb)` run before `syncCanvasLevel()` and `show()`. Previously windows were tiled *after* the canvas appeared, causing: (a) two visual transitions (canvas shows, then windows resize); (b) `setFrame` reshuffling z-order and burying the just-shown canvas. Now windows resize first while the canvas is still hidden, then the canvas appears already at the correct level above the tiled windows — single visual transition.
+
+## 2026-06-12
+
+- **Tiling cascade guard** — added `_tilingInProgress` flag set before any `setFrame` loop (via `_withTilingGuard`) and cleared after `settleDelay + 0.1s`. `handleWindowMoveOrResize` checks and bails early if a tile is in flight, breaking the `setFrame` → `windowMoved` → retile cascade. Also guards the drift-path `setFrame` loop in `handleWindowMoveOrResize`. Cleaned up in `stop()`/`init()`.
+- **Eliminated double-tile on sidebar show** — show path in `toggleSidebar` now inlines anchor computation and calls `buildSidebar()` directly (no synchronous `tileITermWindows`), letting `_doBuildSidebar` be the sole tile trigger. `refreshLayout` sets `_skipTileOnThisBuild = true` after its sync tile to prevent `_doBuildSidebar` from tiling again.
+- **Guard watchers during hide** — `_rebuildAfterSettle` now checks `_toggleLock` before scheduling any rebuild, preventing stale work during the 0.5s hide/show lock window.
+- **Reload hygiene** — `stop()` now cleans up `_resizeDebounceTimer`, `_tilingClearTimer`, `_tilingInProgress`, `_pendingSidebarFrame`, and `_currentScreen`. `init()` initializes `_tilingInProgress` and `_tilingClearTimer`.
+
 ## 2026-06-09
 
 - **Phase 1: Decouple tiling from sidebar** — added `_tilingEnabled` state variable (init'd `true`), `toggleTiling()` function, and `⌘⇧T` hotkey. No behavioral change yet — the toggle flips state and re-tiles when re-enabled, but nothing is gated behind it (Phase 2 adds the actual guards).
 - **Phase 2: Gate all window frame manipulation behind `_tilingEnabled`** — `tileITermWindows()`, the `setFrame()` loop in `handleWindowMoveOrResize()`, the retile guard in `_doBuildSidebar()`, and `_rebuildAfterSettle()` all check `_tilingEnabled` before touching any window frame. Toggling tiling OFF now actually prevents window layout changes; the sidebar repositions itself to the focused window but does not resize/move any iTerm windows.
+- **Phase 3: Sidebar follows focused window when tiling is off** — `windowFocused` handler repositions the sidebar canvas to the newly focused iTerm window using direct `canvas:setFrame()` instead of going through the `buildSidebar()` pipeline. This bypasses the snapshot-check/debounce/rebuild machinery and moves the canvas instantly. Only fires when position actually differs (avoids redundant calls on stacked windows).
 
 ## 2026-06-06
 
