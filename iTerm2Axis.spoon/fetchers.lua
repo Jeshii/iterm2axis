@@ -80,7 +80,7 @@ function FETCH_WINDOW_INFO(win)
 				CACHE.wc(winId).hostname = (hostname and hostname ~= "") and hostname or CACHE.MISSING
 			end
 
-			if OBJ.sidebarCanvas and OBJ._sidebarEnabled and OBJ._sidebarVisible then
+			if OBJ.sidebarCanvas and OBJ._sidebarVisible then
 				OBJ:buildSidebar()
 			end
 		end, { "-e", script })
@@ -123,7 +123,7 @@ function GET_GIT_BRANCH_FOR_PATH(path, winId)
 						local wsLeaf = ws and ws:match("([^/]+)%s*$")
 						CACHE.wc(winId).wsName = (wsLeaf and wsLeaf ~= "") and wsLeaf or CACHE.MISSING
 						hs.timer.doAfter(0, function()
-							if OBJ.sidebarCanvas and OBJ._sidebarEnabled and OBJ._sidebarVisible then
+							if OBJ.sidebarCanvas and OBJ._sidebarVisible then
 								OBJ:buildSidebar()
 							end
 						end)
@@ -147,7 +147,7 @@ function GET_GIT_BRANCH_FOR_PATH(path, winId)
 			CACHE.wc(winId).branch = (branch and branch ~= "") and branch or CACHE.MISSING
 			CACHE.wc(winId).wsName = CACHE.MISSING
 			hs.timer.doAfter(0, function()
-				if OBJ.sidebarCanvas and OBJ._sidebarEnabled and OBJ._sidebarVisible then
+				if OBJ.sidebarCanvas and OBJ._sidebarVisible then
 					OBJ:buildSidebar()
 				end
 			end)
@@ -201,7 +201,7 @@ function OBJ:fetchClaudeAgentsData()
 			if next(newData) then
 				CACHE._claudeAgentsData = newData
 			end
-			if self.sidebarCanvas and self._sidebarEnabled and self._sidebarVisible then
+			if self.sidebarCanvas and self._sidebarVisible then
 				self:buildSidebar()
 			end
 		end, { "claude", "agents", "--json" })
@@ -222,7 +222,7 @@ end
 function OBJ:_finalizeOpenCodeData(newData)
 	self._opencodeData = newData
 	self._opencodePending = false
-	if self.sidebarCanvas and self._sidebarEnabled and self._sidebarVisible then
+	if self.sidebarCanvas and self._sidebarVisible then
 		self:buildSidebar()
 	end
 end

@@ -394,14 +394,13 @@ function OBJ:_doBuildSidebar()
 	end
 	self._buildPending = true
 
-	local ok = pcall(function()
+	local ok, err = pcall(function()
 		local wins = CACHE.getITermWindows()
 
 		if #wins == 0 then
 			self:_closeMenus()
 			if self.sidebarCanvas then
 				self.sidebarCanvas:hide()
-				self._sidebarVisible = false
 			end
 			return
 		end
@@ -436,7 +435,7 @@ function OBJ:_doBuildSidebar()
 		self:_renderFullSidebar(sb, winData, structureSnap, btnH)
 
 		self._sidebarVisible = true
-		if needsRetile and self._tilingEnabled and not self._skipTileOnThisBuild then
+		if needsRetile and not self._skipTileOnThisBuild then
 			self:tileITermWindows(sb)
 		end
 		self:syncCanvasLevel()
@@ -453,11 +452,11 @@ function OBJ:_doBuildSidebar()
 	end)
 
 	if not ok then
+		print("[iterm2axis] _doBuildSidebar error: " .. tostring(err))
 		if self.sidebarCanvas then
 			self.sidebarCanvas:delete()
 			self.sidebarCanvas = nil
 		end
-		self._sidebarVisible = false
 		self._lastSidebarSnapshot = nil
 		self._lastStructureSnapshot = nil
 		self._buttonFrames = {}

@@ -66,9 +66,6 @@ function OBJ:getSidebarAnchor()
 end
 
 function OBJ:tileITermWindows(sb)
-	if not self._tilingEnabled then
-		return
-	end
 	local screenFrame = self:getScreen():frame()
 	local newFrame
 	if self._sidebarVisible then
@@ -137,7 +134,6 @@ function OBJ:toggleSidebar()
 		self._sidebarVisible = false
 		self._toggleLock = true
 		self._lastStructureSnapshot = nil
-		self:tileITermWindows()
 		hs.timer.doAfter(0.5, function()
 			self._toggleLock = false
 		end)
@@ -168,14 +164,6 @@ function OBJ:toggleSidebar()
 		end)
 		hs.alert.show("Sidebar Shown")
 	end
-end
-
-function OBJ:toggleTiling()
-	self._tilingEnabled = not self._tilingEnabled
-	if self._tilingEnabled then
-		self:forceRetile()
-	end
-	hs.alert.show("Tiling " .. (self._tilingEnabled and "Enabled" or "Disabled"))
 end
 
 function OBJ:forceRetile()
@@ -225,9 +213,6 @@ end
 
 function OBJ:syncCanvasLevel()
 	if not self.sidebarCanvas then
-		return
-	end
-	if not self._sidebarEnabled then
 		return
 	end
 

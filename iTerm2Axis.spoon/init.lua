@@ -87,7 +87,6 @@ end
 
 ACTION_LABELS = {
 	toggle = "Show/Hide Sidebar",
-	toggleTiling = "Enable/Disable Tiling",
 	swapSide = "Swap Side",
 	refresh = "Refresh Layout",
 }
@@ -159,7 +158,7 @@ dofile(BASE_PATH .. "watchers.lua")
 --- Bind hotkeys for iTerm2Axis.
 ---
 --- Parameters:
----  * mapping - A table with keys: toggle, toggleTiling, newWindow, refresh,
+---  * mapping - A table with keys: toggle, newWindow, refresh,
 ---    moveUp, moveDown, moveToTop, moveToBottom, focusUp, focusDown, swapSide
 ---    Each value is a table: { modifiers, key }
 function OBJ:bindHotkeys(mapping)
@@ -175,7 +174,6 @@ function OBJ:bindHotkeys(mapping)
 	local focusUpMods, focusUpKey = table.unpack(map.focusUp or { { "alt", "cmd" }, "up" })
 	local focusDownMods, focusDownKey = table.unpack(map.focusDown or { { "alt", "cmd" }, "down" })
 	local swapSideMods, swapSideKey = table.unpack(map.swapSide or { { "cmd", "shift" }, "S" })
-	local tilingMods, tilingKey = table.unpack(map.toggleTiling or { { "cmd", "shift" }, "T" })
 
 	self._hotkeyLabels.toggle = FORMAT_HOTKEY_LABEL(toggleMods, toggleKey)
 	self._hotkeyLabels.refresh = FORMAT_HOTKEY_LABEL(refreshMods, refreshKey)
@@ -184,7 +182,6 @@ function OBJ:bindHotkeys(mapping)
 	self._hotkeyLabels.moveToTop = FORMAT_HOTKEY_LABEL(moveTopMods, moveTopKey)
 	self._hotkeyLabels.moveToBottom = FORMAT_HOTKEY_LABEL(moveBottomMods, moveBottomKey)
 	self._hotkeyLabels.swapSide = FORMAT_HOTKEY_LABEL(swapSideMods, swapSideKey)
-	self._hotkeyLabels.toggleTiling = FORMAT_HOTKEY_LABEL(tilingMods, tilingKey)
 
 	hs.hotkey.bind(toggleMods, toggleKey, function()
 		self:toggleSidebar()
@@ -247,10 +244,6 @@ function OBJ:bindHotkeys(mapping)
 
 	hs.hotkey.bind(focusDownMods, focusDownKey, function()
 		self:focusNextWindow(1)
-	end)
-
-	hs.hotkey.bind(tilingMods, tilingKey, function()
-		self:toggleTiling()
 	end)
 end
 
@@ -391,8 +384,6 @@ function OBJ:init()
 	self._spaceWatcher = nil
 	self._appWatcher = nil
 	self._sidebarVisible = false
-	self._sidebarEnabled = true
-	self._tilingEnabled = true
 	self._hotkeyLabels = {}
 	self._swapInProgress = false
 	self._refreshInProgress = false

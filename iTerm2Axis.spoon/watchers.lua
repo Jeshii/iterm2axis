@@ -128,10 +128,8 @@ function OBJ:handleWindowMoveOrResize()
 			local contentX = math.max(l.content.x, math.min(f.x, l.content.x + l.content.w - contentW))
 			local newFrame = { x = contentX, y = f.y, w = contentW, h = f.h }
 			self:_withTilingGuard(function()
-				if self._tilingEnabled then
-					for _, w in ipairs(wins) do
-						w:setFrame(newFrame)
-					end
+				for _, w in ipairs(wins) do
+					w:setFrame(newFrame)
 				end
 			end)
 
@@ -149,7 +147,7 @@ function OBJ:_rebuildAfterSettle(tileWhenHidden)
 		end
 		self._lastStructureSnapshot = nil
 		self:buildSidebar()
-		if tileWhenHidden and not self._sidebarVisible and self._tilingEnabled then
+		if tileWhenHidden and not self._sidebarVisible then
 			self:tileITermWindows()
 		end
 	end)
@@ -262,18 +260,6 @@ function OBJ:_setupWindowWatcher()
 			hs.timer.doAfter(0.05, function()
 				self:syncCanvasLevel()
 			end)
-
-			if not self._tilingEnabled and self._sidebarVisible and self.sidebarCanvas then
-				local f = win:frame()
-				local sf = win:screen():frame()
-				local newPos = self:layoutFrames(sf, f).sidebar
-				local curFrame = self.sidebarCanvas:frame()
-				local dx = math.abs(newPos.x - curFrame.x)
-				local dy = math.abs(newPos.y - curFrame.y)
-				if dx > 2 or dy > 2 then
-					self.sidebarCanvas:setFrame(newPos)
-				end
-			end
 		end
 	end)
 end
@@ -350,9 +336,6 @@ function OBJ:_setupSleepWatcher()
 end
 
 function OBJ:refreshSleepWake()
-	if not self._sidebarEnabled then
-		return
-	end
 	self._pendingSidebarFrame = nil
 	self._currentScreen = nil
 	self._lastStructureSnapshot = nil
@@ -434,7 +417,7 @@ function OBJ:_setupSpaceWatcher()
 		self:_checkFullScreenAndAdjust()
 		self:syncCanvasLevel()
 		hs.timer.doAfter(self.config.settleDelay, function()
-			if self.sidebarCanvas and self._sidebarEnabled and self._sidebarVisible and not self._fullScreenActive then
+			if self.sidebarCanvas and self._sidebarVisible and not self._fullScreenActive then
 				self:buildSidebar()
 			end
 		end)
