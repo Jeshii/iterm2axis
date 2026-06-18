@@ -11,6 +11,8 @@ A Hammerspoon [Spoon](https://github.com/Hammerspoon/Spoons) that adds a floatin
 - Drag a tab over a sidebar button to bring that window to front (green highlight) — merge tabs across windows
 - Configurable start hidden, swap sidebar side at runtime
 - Auto-refreshes on window open/close/title change and screen layout changes
+- OpenCode and Claude Code agent data displayed per-window: model name, status (busy/waiting/idle), and waiting-for reason
+- macOS native full-screen (green button) auto-hides the sidebar and excludes full-screened windows from tiling
 
 ## Installation
 
@@ -109,19 +111,20 @@ spoon.iTerm2Axis.config = {
     textColor = {red=0.9, green=0.9, blue=0.9, alpha=1},
     padding = 8,
     debug = false,
+    debug = false,                     -- verbose logging
     opencode = {
         enabled = true,
-        port = 4096,
-        pollInterval = 5,
+        port = 4096,                    -- opencode HTTP API port
+        pollInterval = 5,               -- seconds between polls
     },
     claudecode = {
         enabled = true,
-        pollInterval = 5,
-        flashInterval = 2.0,
+        pollInterval = 5,               -- seconds between polls
+        flashInterval = 2.0,            -- seconds for bell flash on state changes
     },
     bell = {
         enabled = true,
-        flashInterval = 2.0,
+        flashInterval = 2.0,            -- seconds for bell flash on terminal bell
         flashColor = {red=0.95, green=0.85, blue=0.4, alpha=0.85},
     },
 }

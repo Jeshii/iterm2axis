@@ -17,7 +17,8 @@ A Hammerspoon window manager that provides a sidebar (configurable left or right
 
 - A floating sidebar canvas is drawn on the configured side (left or right, default left).
 - All iTerm2 windows are tiled to fill the remaining space adjacent to the sidebar.
-- Each iTerm window is listed as a button in the sidebar — Line 1 shows the tab name with dot indicators, PWD basename, or remote hostname (in that priority order); Line 2 shows PWD basename (when different from Line 1); Line 3 shows git branch
+- macOS native full-screen (green button) auto-hides the sidebar and excludes full-screened windows from tiling.
+- Each iTerm window is listed as a button in the sidebar — Lines (top to bottom): tab name with dot indicators, PWD basename (when different from tab name), git branch, opencode session info (model name + tokens), claude agent info (model name + waiting-for reason)
 - Right-click on any sidebar button opens a canvas-based context menu with actions: Move Up/Down/ToTop/ToBottom, Refresh Layout, Show/Hide Axis, Swap Side. Right-clicking empty sidebar area opens a global menu with Refresh Layout, Show/Hide Axis, Swap Side.
 - The sidebar snap formula (left): `sidebarX = math.max(f.x, sf.x)`; the iTerm window shrinks from its left edge so its right edge stays anchored. For right side: `sidebarX = math.min(f.x + f.w, sf.x + sf.w) - sidebarWidth`.
 - If a window is dragged off the sidebar's range (by more than sidebar width), the sidebar reattaches to the next overlapping window.
