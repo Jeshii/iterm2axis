@@ -49,6 +49,7 @@ function RENDER.sidebarStateSnapshot(wins, activeId, opencodeData)
 				RENDER.ocSnippet(opencodeData, fullPath),
 				tostring(claudeAgent and claudeAgent.status or ""),
 				tostring(claudeAgent and claudeAgent.waitingFor or ""),
+				tostring(claudeAgent and claudeAgent.modelID or ""),
 			}, "\t")
 		)
 	end
@@ -129,6 +130,10 @@ function RENDER.buildTextRows(wd)
 	end
 	if wd.claudeAgent then
 		table.insert(rows, { text = "claude", fs = dfs - 1, color = HEADER_COLOR })
+		local modelStr = SHORT_MODEL_NAME(wd.claudeAgent.modelID)
+		if modelStr then
+			table.insert(rows, { text = modelStr, fs = dfs - 1, color = DETAIL_COLOR })
+		end
 		if wd.claudeAgent.waitingFor then
 			table.insert(
 				rows,

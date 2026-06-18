@@ -1,3 +1,9 @@
+## 2026-06-18
+
+- **Claude Code sidebar now shows model name, no Python dependency** — `fetchClaudeAgentsData` runs `claude agents --json` directly via `/usr/bin/env`, parses JSON with `hs.json.decode`, and reads the session's `.jsonl` file in pure Lua to extract `modelID`. Removed `RESOLVE_PYTHON_PATH()`, `buildCCModelCmd()`, and the `pythonPath` config option. The entire enrichment pipeline is now implemented in Lua using `io.open` and `hs.json.decode`. Displayed as a `DETAIL_COLOR` row under the "claude" header. Also fixed a `string.format` error caused by an unescaped `%` in the old Python inline script.
+- **Claude CLI path auto-resolution** — replaces the broken `which claude` async check with `RESOLVE_CLAUDE_PATH()` that probes `~/.local/bin/claude`, `/opt/homebrew/bin/claude`, and `/usr/local/bin/claude` at startup. The claude binary is invoked via `/bin/sh -c` with the full resolved path.
+- **Parsed-agents log gated behind `debug` config**, `SHORT_MODEL_NAME` strips `claude-` prefix.
+
 ## 2026-06-16
 
 - **Removed tiling on/off feature (`_tilingEnabled`, `toggleTiling()`, `⌘⇧T` hotkey)** — hiding the sidebar already disables tiling, making a separate toggle misleading. Tiling is now always active when the sidebar is visible. The tiling cascade guard (`_tilingInProgress`, `_withTilingGuard`) is preserved as a stability mechanism. Removed: `_tilingEnabled` state var and all 4 guard conditions across `windows.lua`/`render.lua`/`watchers.lua`, `toggleTiling()` function, `toggleTiling` from `ACTION_LABELS` and `bindHotkeys()`, and the Phase 3 "sidebar follows focus when tiling off" block in `windowFocused` handler.

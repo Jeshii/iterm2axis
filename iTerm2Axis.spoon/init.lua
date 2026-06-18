@@ -274,8 +274,14 @@ function OBJ:start()
 		self:startOpenCodePolling()
 	end
 
+	self._claudePath = RESOLVE_CLAUDE_PATH()
 	if self.config.claudecode.enabled then
-		self:startClaudeAgentsPolling()
+		if self._claudePath then
+			print("[iterm2axis] Claude CLI resolved to: " .. self._claudePath)
+			self:startClaudeAgentsPolling()
+		else
+			print("[iterm2axis] WARNING: claude CLI not found, claudecode polling disabled")
+		end
 	end
 
 	hs.alert.show("iTerm2Axis loaded ✓", 1.5)
@@ -363,6 +369,7 @@ function OBJ:stop()
 		self._claudeAgentsPollTimer:stop()
 		self._claudeAgentsPollTimer = nil
 	end
+	self._claudePath = nil
 	CACHE._claudeAgentsData = {}
 	self._lastSidebarSnapshot = nil
 	self._lastStructureSnapshot = nil
@@ -398,6 +405,7 @@ function OBJ:init()
 	self._opencodePollTimer = nil
 	self._claudeAgentsPending = false
 	self._claudeAgentsPollTimer = nil
+	self._claudePath = nil
 	self._ghAvailable = false
 	self._btnBgElements = {}
 	self._lastSidebarSnapshot = nil

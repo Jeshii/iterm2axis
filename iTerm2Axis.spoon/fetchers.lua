@@ -162,6 +162,7 @@ function SHORT_MODEL_NAME(id)
 		return nil
 	end
 	local name = id:match("[^/]+$") or id
+	name = name:gsub("^claude%-", "")
 	return name
 end
 
@@ -175,36 +176,94 @@ function FMT_TOKENS(n)
 	return tostring(n)
 end
 
+function RESOLVE_CLAUDE_PATH()
+	local home = os.getenv("HOME")
+	local candidates = {
+		home .. "/.local/bin/claude",
+		"/opt/homebrew/bin/claude",
+		"/usr/local/bin/claude",
+	}
+	for _, path in ipairs(candidates) do
+		local f = io.open(path, "r")
+		if f then
+			f:close()
+			return path
+		end
+	end
+	return nil
+end
+
 function OBJ:fetchClaudeAgentsData()
 	if self._claudeAgentsPending then
 		return
 	end
+	if not self.config.claudecode.enabled then
+		return
+	end
+	if not self._claudePath then
+		return
+	end
+
 	self._claudeAgentsPending = true
 
 	hs.task
-		.new("/usr/bin/env", function(_, stdout, _)
+		.new("/bin/sh", function(_, stdout, stderr)
 			self._claudeAgentsPending = false
+
 			local newData = {}
 			if stdout and stdout ~= "" then
 				local ok, agents = pcall(hs.json.decode, stdout)
 				if ok and type(agents) == "table" then
 					for _, a in ipairs(agents) do
 						if a.cwd then
+							local modelID
+							if a.sessionId then
+								local encoded = a.cwd:gsub("%.", "-"):gsub("/", "-")
+								local jsonlPath = os.getenv("HOME")
+									.. "/.claude/projects/"
+									.. encoded
+									.. "/"
+									.. a.sessionId
+									.. ".jsonl"
+								local f = io.open(jsonlPath, "r")
+								if f then
+									for line in f:lines() do
+										local d_ok, d = pcall(hs.json.decode, line)
+										if d_ok and type(d) == "table" then
+											local msg = d.message or {}
+											if type(msg) == "table" and msg.model then
+												modelID = msg.model
+												break
+											end
+										end
+									end
+									f:close()
+								end
+							end
 							newData[a.cwd] = {
 								status = a.status,
 								waitingFor = a.waitingFor,
+								modelID = modelID,
 							}
 						end
 					end
+					if self.config.debug then
+						print(string.format("[iterm2axis] fetchClaudeAgentsData: parsed %d agents", #agents))
+					end
+				else
+					print("[iterm2axis] fetchClaudeAgentsData: JSON decode failed: " .. tostring(stdout))
 				end
+			elseif stderr and stderr ~= "" then
+				print("[iterm2axis] fetchClaudeAgentsData: stderr: " .. stderr)
 			end
+
 			if next(newData) then
 				CACHE._claudeAgentsData = newData
 			end
 			if self.sidebarCanvas and self._sidebarVisible then
 				self:buildSidebar()
 			end
-		end, { "claude", "agents", "--json" })
+		end, { "-c", self._claudePath .. " agents --json" })
 		:start()
 end
 
