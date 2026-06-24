@@ -217,11 +217,7 @@ function OBJ:syncCanvasLevel()
 	end
 
 	self.sidebarCanvas:level(hs.canvas.windowLevels.normal)
-
-	local frontApp = hs.application.frontmostApplication()
-	if frontApp and frontApp:bundleID() == ITERM_BID then
-		self.sidebarCanvas:orderAbove(nil)
-	end
+	self.sidebarCanvas:orderAbove(nil)
 end
 
 function OBJ:_syncOrderedIds()

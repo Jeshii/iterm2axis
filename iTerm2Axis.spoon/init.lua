@@ -421,6 +421,7 @@ function OBJ:init()
 	self._tilingInProgress = false
 	self._tilingClearTimer = nil
 	self._fullScreenActive = false
+	self._lastClickConsumed = false
 	return self
 end
 

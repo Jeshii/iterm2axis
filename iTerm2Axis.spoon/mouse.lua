@@ -13,13 +13,21 @@ function OBJ:_closeMenus()
 	end
 end
 
-local function isSidebarClickAllowed()
-	local front = hs.application.frontmostApplication()
-	if not front then
+local function shouldConsumeSidebarClick(clickPt)
+	if not OBJ.sidebarCanvas or not OBJ.sidebarCanvas:isShowing() then
 		return false
 	end
-	local bid = front:bundleID()
-	return bid == ITERM_BID or bid == HAMMERSPOON_BID
+	for _, win in ipairs(hs.window.orderedWindows()) do
+		if not win:isMinimized() then
+			local f = win:frame()
+			if RECT_CONTAINS(f, clickPt.x, clickPt.y) then
+				if win:level() > hs.window.windowLevels.normal then
+					return false
+				end
+			end
+		end
+	end
+	return true
 end
 
 function OBJ:handleSidebarClick(x, y, rightClick)
@@ -305,12 +313,14 @@ function OBJ:_setupSidebarClickTap()
 			end
 			local mouse = e:location()
 			if RECT_CONTAINS(sf, mouse.x, mouse.y) then
-				if not isSidebarClickAllowed() then
-					return
+				if shouldConsumeSidebarClick(mouse) then
+					self._lastClickConsumed = true
+					local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
+					self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, isRight)
+					return true
 				end
-				local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
-				self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, isRight)
 			end
+			self._lastClickConsumed = false
 		end)
 		if not ok then
 			print("[iterm2axis] _clickTap error:", err)
@@ -353,7 +363,7 @@ function OBJ:_setupDragTap()
 		local mouse = e:location()
 
 		if RECT_CONTAINS(sf, mouse.x, mouse.y) then
-			if not isSidebarClickAllowed() then
+			if not self._lastClickConsumed then
 				return false
 			end
 
