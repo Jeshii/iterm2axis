@@ -30,6 +30,11 @@ local function shouldConsumeSidebarClick(clickPt)
 	return true
 end
 
+local function isITermFrontmost()
+	local front = hs.application.frontmostApplication()
+	return front ~= nil and front:bundleID() == ITERM_BID
+end
+
 function OBJ:handleSidebarClick(x, y, rightClick)
 	local app = hs.application.get(ITERM_BID)
 	if app then
@@ -363,7 +368,7 @@ function OBJ:_setupDragTap()
 		local mouse = e:location()
 
 		if RECT_CONTAINS(sf, mouse.x, mouse.y) then
-			if not self._lastClickConsumed then
+			if not self._lastClickConsumed and not isITermFrontmost() then
 				return false
 			end
 
