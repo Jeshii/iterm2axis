@@ -1,3 +1,7 @@
+## 2026-06-26
+
+- **Added repo name display above branch name for git repos** — the git repo name (basename of toplevel) is now shown as a separate orange row above the branch line in the sidebar. `GET_GIT_BRANCH_FOR_PATH` now also fetches and caches `repoName` from `git rev-parse --show-toplevel`. For worktrees, the repo name is derived from `TOPLEVEL` in the existing script. New `repoNameColor` config option (orange).
+
 ## 2026-06-18
 
 - **Claude Code sidebar now shows model name, no Python dependency** — `fetchClaudeAgentsData` runs `claude agents --json` directly via `/usr/bin/env`, parses JSON with `hs.json.decode`, and reads the session's `.jsonl` file in pure Lua to extract `modelID`. Removed `RESOLVE_PYTHON_PATH()`, `buildCCModelCmd()`, and the `pythonPath` config option. The entire enrichment pipeline is now implemented in Lua using `io.open` and `hs.json.decode`. Displayed as a `DETAIL_COLOR` row under the "claude" header. Also fixed a `string.format` error caused by an unescaped `%` in the old Python inline script.

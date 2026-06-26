@@ -38,6 +38,7 @@ OBJ.config = {
 	borderColor = { red = 0.3, green = 0.3, blue = 0.35, alpha = 0.5 },
 	wsNameColor = { red = 0.9, green = 0.75, blue = 0.4, alpha = 0.9 },
 	branchColor = { red = 0.5, green = 0.75, blue = 0.5, alpha = 0.9 },
+	repoNameColor = { red = 0.9, green = 0.6, blue = 0.3, alpha = 0.9 },
 	menuBgColor = { red = 0.15, green = 0.15, blue = 0.17, alpha = 0.97 },
 	menuHighlightColor = { red = 0.25, green = 0.4, blue = 0.6, alpha = 0.85 },
 

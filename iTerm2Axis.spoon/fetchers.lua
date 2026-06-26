@@ -104,22 +104,31 @@ function GET_GIT_BRANCH_FOR_PATH(path, winId)
 	CACHE.wc(winId).brPending = true
 
 	hs.task
-		.new("/usr/bin/git", function(_, stdout, _)
-			local branch = stdout and stdout:gsub("%s+$", "")
-			if not branch or branch == "" or branch == "HEAD" then
+		.new("/bin/sh", function(_, stdout, _)
+			local branch, repoName
+			if stdout and stdout ~= "" then
+				local b, t = stdout:match("^([^\n]+)\n(.+)$")
+				if b and b ~= "" and b ~= "HEAD" then
+					branch = b
+					local toplevel = t and t:gsub("%s+$", "")
+					repoName = toplevel and toplevel:match("([^/]+)%s*$")
+				end
+			end
+			if not branch then
 				hs.task
 					.new("/bin/sh", function(_, out, _)
 						CACHE.wc(winId).brPending = nil
-						local b, ws
+						local b, rn, ws
 						if out and out ~= "" then
-							b, ws = out:match("^([^\t]+)\t?(.*)$")
-							b = b and b:gsub("%s+$", "")
-							ws = ws and ws:gsub("%s+$", "")
-							if ws == "" then
-								ws = nil
+							b, rn, ws = out:match("^([^\t]+)\t([^\t]+)\t(.*)$")
+							if b then
+								b = b:gsub("%s+$", "")
+								rn = rn ~= "" and rn:gsub("%s+$", "") or nil
+								ws = ws ~= "" and ws:gsub("%s+$", "") or nil
 							end
 						end
 						CACHE.wc(winId).branch = (b and b ~= "") and b or CACHE.MISSING
+						CACHE.wc(winId).repoName = (rn and rn ~= "") and rn or CACHE.MISSING
 						local wsLeaf = ws and ws:match("([^/]+)%s*$")
 						CACHE.wc(winId).wsName = (wsLeaf and wsLeaf ~= "") and wsLeaf or CACHE.MISSING
 						hs.timer.doAfter(0, function()
@@ -134,9 +143,10 @@ function GET_GIT_BRANCH_FOR_PATH(path, winId)
 							.. path
 							.. [[' 2>/dev/null || exit 1
                 TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
-                git worktree list --porcelain 2>/dev/null | awk -v wt="$TOPLEVEL" '
+                REPONAME=$(basename "$TOPLEVEL")
+                git worktree list --porcelain 2>/dev/null | awk -v wt="$TOPLEVEL" -v rn="$REPONAME" '
                     /^worktree / { count++; cur=$2; next }
-                    /^branch /  { if (cur==wt && count > 1) { sub("^branch refs/heads/",""); print $0"\t"cur } }
+                    /^branch /  { if (cur==wt && count > 1) { sub("^branch refs/heads/",""); print $0"\t"rn"\t"cur } }
                 ' | head -1
             ]],
 					})
@@ -144,14 +154,25 @@ function GET_GIT_BRANCH_FOR_PATH(path, winId)
 				return
 			end
 			CACHE.wc(winId).brPending = nil
-			CACHE.wc(winId).branch = (branch and branch ~= "") and branch or CACHE.MISSING
+			CACHE.wc(winId).branch = branch
+			CACHE.wc(winId).repoName = repoName or CACHE.MISSING
 			CACHE.wc(winId).wsName = CACHE.MISSING
 			hs.timer.doAfter(0, function()
 				if OBJ.sidebarCanvas and OBJ._sidebarVisible then
 					OBJ:buildSidebar()
 				end
 			end)
-		end, { "-C", path, "rev-parse", "--abbrev-ref", "HEAD" })
+		end, {
+			"-c",
+			[[
+                cd ']] .. path .. [[' 2>/dev/null || exit 1
+                BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 1
+                test "$BRANCH" = "HEAD" && exit 1
+                TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null)
+                echo "$BRANCH"
+                echo "$TOPLEVEL"
+            ]],
+		})
 		:start()
 
 	return CACHE.wc(winId).branch or nil

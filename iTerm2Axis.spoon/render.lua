@@ -45,6 +45,7 @@ function RENDER.sidebarStateSnapshot(wins, activeId, opencodeData)
 				tostring(FLASH.claudeState(win) or ""),
 				tostring(fullPath),
 				tostring(CACHE.wc(id).branch or ""),
+				tostring(CACHE.wc(id).repoName or ""),
 				tostring(CACHE.wc(id).wsName or ""),
 				RENDER.ocSnippet(opencodeData, fullPath),
 				tostring(claudeAgent and claudeAgent.status or ""),
@@ -106,6 +107,9 @@ function RENDER.buildTextRows(wd)
 	end
 	if wd.basename then
 		table.insert(rows, { text = wd.basename, fs = dfs, color = DETAIL_COLOR })
+	end
+	if wd.repoName and wd.branch then
+		table.insert(rows, { text = wd.repoName, fs = dfs, color = CFG.repoNameColor })
 	end
 	local l3 = RENDER.line3Display(wd)
 	if l3 then
@@ -234,6 +238,7 @@ function OBJ:_gatherWindowData(orderedWins)
 			end
 			local basename = fullPath and fullPath:match("([^/]+)%s*$") or parts.basename
 			local branch = fullPath and GET_GIT_BRANCH_FOR_PATH(fullPath, winId) or nil
+			local repoName = CACHE.wc(winId).repoName or nil
 			local wsName = CACHE.wc(winId).wsName or nil
 			local hostname = CACHE.wc(winId).hostname or parts.host
 			local tabInfo = CACHE.wc(winId).tabInfo
@@ -266,6 +271,7 @@ function OBJ:_gatherWindowData(orderedWins)
 				hostname = hostname,
 				basename = basename,
 				branch = branch,
+				repoName = repoName,
 				wsName = wsName,
 				prFromTitle = prFromTitle,
 				ocData = ocData,
@@ -274,6 +280,7 @@ function OBJ:_gatherWindowData(orderedWins)
 					label = label,
 					hostname = hostname,
 					branch = branch,
+					repoName = repoName,
 					wsName = wsName,
 					prFromTitle = prFromTitle,
 					ocData = ocData,
