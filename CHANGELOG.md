@@ -1,3 +1,7 @@
+## 2026-07-01
+
+- **Fixed `_buildPending` never cleared on early return** — `_doBuildSidebar` sets `self._buildPending = true` as a re-entrancy guard, but two early-return paths inside the `pcall` block (no windows, snapshot unchanged) escaped without resetting it to `false`, permanently freezing the sidebar. Added `self._buildPending = false` before both early returns.
+
 ## 2026-06-26
 
 - **Added repo name display above branch name for git repos** — the git repo name (basename of toplevel) is now shown as a separate orange row above the branch line in the sidebar. `GET_GIT_BRANCH_FOR_PATH` now also fetches and caches `repoName` from `git rev-parse --show-toplevel`. For worktrees, the repo name is derived from `TOPLEVEL` in the existing script. New `repoNameColor` config option (orange).

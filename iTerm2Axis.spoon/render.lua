@@ -414,6 +414,7 @@ function OBJ:_doBuildSidebar()
 			if self.sidebarCanvas then
 				self.sidebarCanvas:hide()
 			end
+			self._buildPending = false
 			return
 		end
 
@@ -422,6 +423,7 @@ function OBJ:_doBuildSidebar()
 			if CFG.debug then
 				print("[iterm2axis] _doBuildSidebar: early return (snapshot unchanged)")
 			end
+			self._buildPending = false
 			return
 		end
 		self._lastSidebarSnapshot = snap
