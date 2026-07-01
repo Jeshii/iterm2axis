@@ -1,5 +1,7 @@
 ## 2026-07-01
 
+- **Fixed stale Claude agent badges persisting after agents exit** — `fetchClaudeAgentsData` only updated `CACHE._claudeAgentsData` when `next(newData)` was truthy, which silently ignored both "no agents running" (valid empty JSON `[]`) and "command failed" scenarios. Added a `parseSucceeded` flag that is set only when JSON decode succeeds, replacing the `next(newData)` guard. The cache is now correctly cleared when all agents exit, while still preserved on transient failures.
+
 - **Fixed `_buildPending` never cleared on early return** — `_doBuildSidebar` sets `self._buildPending = true` as a re-entrancy guard, but two early-return paths inside the `pcall` block (no windows, snapshot unchanged) escaped without resetting it to `false`, permanently freezing the sidebar. Added `self._buildPending = false` before both early returns.
 
 ## 2026-06-26

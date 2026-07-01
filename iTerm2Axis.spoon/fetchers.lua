@@ -232,9 +232,11 @@ function OBJ:fetchClaudeAgentsData()
 			self._claudeAgentsPending = false
 
 			local newData = {}
+			local parseSucceeded = false
 			if stdout and stdout ~= "" then
 				local ok, agents = pcall(hs.json.decode, stdout)
 				if ok and type(agents) == "table" then
+					parseSucceeded = true
 					for _, a in ipairs(agents) do
 						if a.cwd then
 							local modelID
@@ -278,7 +280,7 @@ function OBJ:fetchClaudeAgentsData()
 				print("[iterm2axis] fetchClaudeAgentsData: stderr: " .. stderr)
 			end
 
-			if next(newData) then
+			if parseSucceeded then
 				CACHE._claudeAgentsData = newData
 			end
 			if self.sidebarCanvas and self._sidebarVisible then
