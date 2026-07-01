@@ -193,46 +193,50 @@ function OBJ:_setupWindowWatcher()
 		self:_rebuildAfterSettle(true)
 	end)
 	self._winWatcher:subscribe("windowTitleChanged", function(win)
+		if not win then
+			return
+		end
+
 		local isCCStateChange
 		local isBellStateChange
-		if win then
-			local id = win:id()
-			local title = win:title() or ""
-			local stripped = title:gsub("^🔔", "")
-			isCCStateChange = stripped:match("^✳") or stripped:match("^·")
-			isBellStateChange = title:match("^🔔")
-			if not isCCStateChange and not isBellStateChange then
-				local prevCore = stableCore(CACHE.wc(id).lastRawTitle or "")
-				local newCore = stableCore(title)
-				if newCore == prevCore then
-					if not title:match("^[✳·🔔]") then
-						-- Transient CC reset: core unchanged, all decorations
-						-- dropped. Skip flash/rebuild to avoid stomping state.
-						return
-					end
-				else
-					CACHE.invalidateWindow(id, { "wd", "tabInfo", "tabPending", "hostname", "branch", "wsName" })
+
+		local id = win:id()
+		local title = win:title() or ""
+		local stripped = title:gsub("^🔔", "")
+		isCCStateChange = stripped:match("^✳") or stripped:match("^·")
+		isBellStateChange = title:match("^🔔")
+		if not isCCStateChange and not isBellStateChange then
+			local prevCore = stableCore(CACHE.wc(id).lastRawTitle or "")
+			local newCore = stableCore(title)
+			if newCore == prevCore then
+				if not title:match("^[✳·🔔]") then
+					-- Transient CC reset: core unchanged, all decorations
+					-- dropped. Skip flash/rebuild to avoid stomping state.
+					return
 				end
-			end
-			CACHE.wc(id).lastRawTitle = title
-			local focusedWin = hs.window.focusedWindow()
-			local isFocused = focusedWin and focusedWin:id() == id
-			local state = FLASH.claudeState(win)
-			if state == "waiting" and not isFocused then
-				FLASH.startFlashing(id)
-			elseif state == "bell" and not isFocused then
-				FLASH.startFlashing(id, "bell")
-			elseif state == "busy" then
-				-- Busy is shown as solid green (agents data) — stop flash
-				-- and schedule a rebuild so _gatherWindowData sets busyColor.
-				FLASH.stopFlashing(id)
-				hs.timer.doAfter(self.config.settleDelay, function()
-					self:buildSidebar()
-				end)
 			else
-				FLASH.stopFlashing(id)
+				CACHE.invalidateWindow(id, { "wd", "tabInfo", "tabPending", "hostname", "branch", "wsName" })
 			end
 		end
+		CACHE.wc(id).lastRawTitle = title
+		local focusedWin = hs.window.focusedWindow()
+		local isFocused = focusedWin and focusedWin:id() == id
+		local state = FLASH.claudeState(win)
+		if state == "waiting" and not isFocused then
+			FLASH.startFlashing(id)
+		elseif state == "bell" and not isFocused then
+			FLASH.startFlashing(id, "bell")
+		elseif state == "busy" then
+			-- Busy is shown as solid green (agents data) — stop flash
+			-- and schedule a rebuild so _gatherWindowData sets busyColor.
+			FLASH.stopFlashing(id)
+			hs.timer.doAfter(self.config.settleDelay, function()
+				self:buildSidebar()
+			end)
+		else
+			FLASH.stopFlashing(id)
+		end
+
 		-- Non‑CC title changes: real navigations and bells need a sidebar rebuild.
 		if not isCCStateChange or isBellStateChange then
 			hs.timer.doAfter(self.config.settleDelay, function()

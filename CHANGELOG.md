@@ -4,6 +4,8 @@
 
 - **Fixed `_buildPending` never cleared on early return** — `_doBuildSidebar` sets `self._buildPending = true` as a re-entrancy guard, but two early-return paths inside the `pcall` block (no windows, snapshot unchanged) escaped without resetting it to `false`, permanently freezing the sidebar. Added `self._buildPending = false` before both early returns.
 
+- **Fixed `windowTitleChanged` using `isCCStateChange`/`isBellStateChange` before assignment when `win` is nil** — both variables were declared at the top of the callback but only assigned inside an `if win then` block. When `windowTitleChanged` fired with a nil window (during app launch, destruction transitions, space switches), both were `nil` and the condition `not isCCStateChange or isBellStateChange` evaluated to `true`, scheduling a redundant `buildSidebar()` on every nil-win title event. Added early `if not win then return end` guard and removed the now-redundant `if win then` wrapper.
+
 ## 2026-06-26
 
 - **Added repo name display above branch name for git repos** — the git repo name (basename of toplevel) is now shown as a separate orange row above the branch line in the sidebar. `GET_GIT_BRANCH_FOR_PATH` now also fetches and caches `repoName` from `git rev-parse --show-toplevel`. For worktrees, the repo name is derived from `TOPLEVEL` in the existing script. New `repoNameColor` config option (orange).
