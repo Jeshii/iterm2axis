@@ -1,5 +1,9 @@
 ## 2026-07-01
 
+- **Fixed `FLASH.startFlashing` ignoring type upgrades for already-flashing windows** — the blanket early return when `_flashingWindows[winId]` was truthy silently dropped `"bell"` events on windows already flashing as `"waiting"`. Replaced with a type-aware check: same type is a no-op, different type updates `_flashType[winId]` and calls `_adjustFlashTimer()` to pick up the new interval. (`iTerm2Axis.spoon/flash.lua:88-97`)
+
+- **Fixed consumed sidebar clicks propagating to iTerm2** — the `_setupSidebarClickTap` eventtap callback wrapped its logic in `pcall` and returned `true` inside it, but the outer callback always returned `false` unconditionally. This meant every sidebar click both switched windows correctly AND sent the raw click through to iTerm2, which could re-focus the window under the cursor. Added `local consumed = false` in the outer scope, set `consumed = true` on handled clicks, and returned `consumed` from the callback. Right-clicks on sidebar buttons no longer open iTerm2's context menu behind the sidebar menu. (`iTerm2Axis.spoon/mouse.lua:310-336`)
+
 - **Fixed stale Claude agent badges persisting after agents exit** — `fetchClaudeAgentsData` only updated `CACHE._claudeAgentsData` when `next(newData)` was truthy, which silently ignored both "no agents running" (valid empty JSON `[]`) and "command failed" scenarios. Added a `parseSucceeded` flag that is set only when JSON decode succeeds, replacing the `next(newData)` guard. The cache is now correctly cleared when all agents exit, while still preserved on transient failures.
 
 - **Fixed `_buildPending` never cleared on early return** — `_doBuildSidebar` sets `self._buildPending = true` as a re-entrancy guard, but two early-return paths inside the `pcall` block (no windows, snapshot unchanged) escaped without resetting it to `false`, permanently freezing the sidebar. Added `self._buildPending = false` before both early returns.

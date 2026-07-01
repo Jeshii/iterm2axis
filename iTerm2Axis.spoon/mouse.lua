@@ -308,6 +308,7 @@ function OBJ:_setupSidebarClickTap()
 		hs.eventtap.event.types.leftMouseDown,
 		hs.eventtap.event.types.rightMouseDown,
 	}, function(e)
+		local consumed = false
 		local ok, err = pcall(function()
 			if not self._sidebarVisible then
 				return
@@ -320,9 +321,10 @@ function OBJ:_setupSidebarClickTap()
 			if RECT_CONTAINS(sf, mouse.x, mouse.y) then
 				if shouldConsumeSidebarClick(mouse) then
 					self._lastClickConsumed = true
+					consumed = true
 					local isRight = e:getType() == hs.eventtap.event.types.rightMouseDown
 					self:handleSidebarClick(mouse.x - sf.x, mouse.y - sf.y, isRight)
-					return true
+					return
 				end
 			end
 			self._lastClickConsumed = false
@@ -330,7 +332,7 @@ function OBJ:_setupSidebarClickTap()
 		if not ok then
 			print("[iterm2axis] _clickTap error:", err)
 		end
-		return false
+		return consumed
 	end)
 	self._clickTap:start()
 end

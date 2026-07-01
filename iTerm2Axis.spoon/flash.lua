@@ -86,10 +86,16 @@ local function _adjustFlashTimer()
 end
 
 function FLASH.startFlashing(winId, flashType)
+	flashType = flashType or "waiting"
+
 	if _flashingWindows[winId] then
+		if _flashType[winId] ~= flashType then
+			_flashType[winId] = flashType
+			_adjustFlashTimer()
+		end
 		return
 	end
-	flashType = flashType or "waiting"
+
 	_flashType[winId] = flashType
 	_flashState[winId] = true
 	local isActive = (winId == OBJ.activeWindowId)
